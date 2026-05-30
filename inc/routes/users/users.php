@@ -114,8 +114,8 @@ function extrachill_api_build_user_response( $user, $full_data = false ) {
 	// Extended fields (own profile or admin only)
 	if ( $full_data ) {
 		// Lifetime membership
-		$membership_data       = get_user_meta( $user_id, 'extrachill_lifetime_membership', true );
-		$is_lifetime_member    = ! empty( $membership_data );
+		$membership_data    = get_user_meta( $user_id, 'extrachill_lifetime_membership', true );
+		$is_lifetime_member = ! empty( $membership_data );
 
 		// Artist/professional status
 		$is_artist       = get_user_meta( $user_id, 'user_is_artist', true ) === '1';
@@ -133,13 +133,13 @@ function extrachill_api_build_user_response( $user, $full_data = false ) {
 			$artist_count = count( $artists );
 		}
 
-		$response['email']               = $user->user_email;
-		$response['is_lifetime_member']  = $is_lifetime_member;
-		$response['is_artist']           = $is_artist;
-		$response['is_professional']     = $is_professional;
-		$response['can_create_artists']  = $can_create_artists;
-		$response['artist_count']        = $artist_count;
-		$response['registered']          = mysql2date( 'c', $user->user_registered );
+		$response['email']              = $user->user_email;
+		$response['is_lifetime_member'] = $is_lifetime_member;
+		$response['is_artist']          = $is_artist;
+		$response['is_professional']    = $is_professional;
+		$response['can_create_artists'] = $can_create_artists;
+		$response['artist_count']       = $artist_count;
+		$response['registered']         = mysql2date( 'c', $user->user_registered );
 	}
 
 	return $response;

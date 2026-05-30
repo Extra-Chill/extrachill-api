@@ -94,7 +94,7 @@ function extrachill_api_media_permission_check( WP_REST_Request $request ) {
 	$user_id   = get_current_user_id();
 
 	// content_embed only requires login
-	if ( $context === 'content_embed' ) {
+	if ( 'content_embed' === $context ) {
 		return true;
 	}
 
@@ -108,7 +108,7 @@ function extrachill_api_media_permission_check( WP_REST_Request $request ) {
 	}
 
 	// User avatar: must be own profile
-	if ( $context === 'user_avatar' ) {
+	if ( 'user_avatar' === $context ) {
 		if ( $target_id !== $user_id ) {
 			return new WP_Error(
 				'rest_forbidden',
@@ -141,7 +141,7 @@ function extrachill_api_media_permission_check( WP_REST_Request $request ) {
 	}
 
 	// Product image: verify user owns product on shop site
-	if ( $context === 'product_image' ) {
+	if ( 'product_image' === $context ) {
 		if ( ! function_exists( 'ec_get_blog_id' ) ) {
 			return new WP_Error(
 				'dependency_missing',
@@ -194,10 +194,12 @@ function extrachill_api_media_upload_handler( WP_REST_Request $request ) {
 	$context   = $request->get_param( 'context' );
 	$target_id = $request->get_param( 'target_id' );
 
-	// Get uploaded file
+	// Get uploaded file. Authorization is handled by the route's permission_callback
+	// (REST requests are authenticated via cookie/nonce or token, not a form nonce),
+	// so the raw $_FILES superglobal access below is intentional and safe.
 	$files = $request->get_file_params();
-	if ( empty( $files['file'] ) && isset( $_FILES['file'] ) ) {
-		$files['file'] = $_FILES['file'];
+	if ( empty( $files['file'] ) && isset( $_FILES['file'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing
+		$files['file'] = $_FILES['file']; // phpcs:ignore WordPress.Security.NonceVerification.Missing
 	}
 
 	if ( empty( $files['file']['name'] ) ) {
@@ -233,7 +235,7 @@ function extrachill_api_media_upload_handler( WP_REST_Request $request ) {
 	}
 
 	// Product images upload to shop site media library
-	if ( $context === 'product_image' ) {
+	if ( 'product_image' === $context ) {
 		return extrachill_api_media_upload_product_image( $uploaded_file, $target_id );
 	}
 
@@ -263,7 +265,7 @@ function extrachill_api_media_upload_handler( WP_REST_Request $request ) {
 	);
 
 	// Associate with post for content_embed if target_id provided
-	$parent_post_id = ( $context === 'content_embed' && $target_id ) ? $target_id : 0;
+	$parent_post_id = ( 'content_embed' === $context && $target_id ) ? $target_id : 0;
 	$attachment_id  = wp_insert_attachment( $attachment, $upload_result['file'], $parent_post_id );
 
 	if ( is_wp_error( $attachment_id ) ) {
@@ -275,7 +277,7 @@ function extrachill_api_media_upload_handler( WP_REST_Request $request ) {
 	$attach_data = wp_generate_attachment_metadata( $attachment_id, $upload_result['file'] );
 	wp_update_attachment_metadata( $attachment_id, $attach_data );
 
-	if ( $context === 'content_embed' && ! $target_id ) {
+	if ( 'content_embed' === $context && ! $target_id ) {
 		update_post_meta( $attachment_id, '_extrachill_content_embed_pending_parent', 1 );
 	}
 
@@ -425,7 +427,7 @@ function extrachill_api_media_delete_handler( WP_REST_Request $request ) {
 	$target_id = $request->get_param( 'target_id' );
 
 	// Product images delete from shop site
-	if ( $context === 'product_image' ) {
+	if ( 'product_image' === $context ) {
 		return extrachill_api_media_delete_product_image( $target_id );
 	}
 

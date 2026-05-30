@@ -31,7 +31,7 @@ function extrachill_api_register_community_notifications_routes() {
 					'type'     => 'boolean',
 					'default'  => false,
 				),
-				'limit' => array(
+				'limit'  => array(
 					'required' => false,
 					'type'     => 'integer',
 					'default'  => 50,
@@ -88,6 +88,7 @@ function extrachill_api_community_notifications_list_handler( WP_REST_Request $r
 }
 
 function extrachill_api_community_notifications_mark_read_handler( WP_REST_Request $request ) {
+	unset( $request );
 	$ability = wp_get_ability( 'extrachill/community-mark-notifications-read' );
 	if ( ! $ability ) {
 		return new WP_Error( 'ability_missing', 'community-mark-notifications-read ability not available.', array( 'status' => 503 ) );

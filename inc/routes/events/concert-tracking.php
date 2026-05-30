@@ -66,10 +66,10 @@ function extrachill_api_register_concert_tracking_routes() {
 					'sanitize_callback' => 'absint',
 				),
 				'include_attendees' => array(
-					'required'          => false,
-					'type'              => 'boolean',
-					'default'           => false,
-					'description'       => 'Include attendee list.',
+					'required'    => false,
+					'type'        => 'boolean',
+					'default'     => false,
+					'description' => 'Include attendee list.',
 				),
 				'limit'             => array(
 					'required'          => false,

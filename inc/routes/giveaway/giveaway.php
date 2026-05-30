@@ -174,7 +174,7 @@ function extrachill_api_giveaway_schedule_handler( WP_REST_Request $request ) {
 		return new WP_Error( 'task_system_missing', 'Data Machine Task System not available.', array( 'status' => 500 ) );
 	}
 
-	$run_at = $request->get_param( 'run_at' );
+	$run_at    = $request->get_param( 'run_at' );
 	$timestamp = strtotime( $run_at );
 	if ( ! $timestamp || $timestamp <= time() ) {
 		return new WP_Error( 'invalid_run_at', 'run_at must be a valid future UTC datetime.', array( 'status' => 400 ) );

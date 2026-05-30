@@ -159,7 +159,7 @@ function extrachill_api_shop_user_can_manage_artist( $artist_id, $user_id = null
  */
 function extrachill_api_shop_products_create_args() {
 	return array(
-		'artist_id'          => array(
+		'artist_id'      => array(
 			'required'          => true,
 			'type'              => 'integer',
 			'sanitize_callback' => 'absint',
@@ -167,35 +167,35 @@ function extrachill_api_shop_products_create_args() {
 				return is_numeric( $value ) && (int) $value > 0;
 			},
 		),
-		'name'               => array(
+		'name'           => array(
 			'required'          => true,
 			'type'              => 'string',
 			'sanitize_callback' => 'sanitize_text_field',
 		),
-		'price'              => array(
+		'price'          => array(
 			'required'          => true,
 			'type'              => 'number',
 			'validate_callback' => function( $value ) {
 				return is_numeric( $value ) && (float) $value > 0;
 			},
 		),
-		'sale_price'         => array(
+		'sale_price'     => array(
 			'required'          => false,
 			'type'              => 'number',
 			'validate_callback' => function( $value ) {
-				return $value === null || is_numeric( $value );
+				return null === $value || is_numeric( $value );
 			},
 		),
-		'description'        => array(
+		'description'    => array(
 			'required' => false,
 			'type'     => 'string',
 		),
-		'manage_stock'       => array(
+		'manage_stock'   => array(
 			'required'          => false,
 			'type'              => 'boolean',
 			'sanitize_callback' => 'rest_sanitize_boolean',
 		),
-		'stock_quantity'     => array(
+		'stock_quantity' => array(
 			'required'          => false,
 			'type'              => 'integer',
 			'sanitize_callback' => 'absint',
@@ -203,7 +203,7 @@ function extrachill_api_shop_products_create_args() {
 				return is_numeric( $value ) && (int) $value >= 0;
 			},
 		),
-		'image_id'           => array(
+		'image_id'       => array(
 			'required'          => false,
 			'type'              => 'integer',
 			'sanitize_callback' => 'absint',
@@ -211,7 +211,7 @@ function extrachill_api_shop_products_create_args() {
 				return is_numeric( $value ) && (int) $value >= 0;
 			},
 		),
-		'gallery_ids'        => array(
+		'gallery_ids'    => array(
 			'required'          => false,
 			'type'              => 'array',
 			'items'             => array( 'type' => 'integer' ),
@@ -222,7 +222,7 @@ function extrachill_api_shop_products_create_args() {
 				return array_map( 'absint', $value );
 			},
 		),
-		'sizes'              => array(
+		'sizes'          => array(
 			'required'          => false,
 			'type'              => 'array',
 			'items'             => array(
@@ -244,7 +244,7 @@ function extrachill_api_shop_products_create_args() {
 				}, $value );
 			},
 		),
-		'ships_free'         => array(
+		'ships_free'     => array(
 			'required'          => false,
 			'type'              => 'boolean',
 			'sanitize_callback' => 'rest_sanitize_boolean',
@@ -258,27 +258,27 @@ function extrachill_api_shop_products_create_args() {
  */
 function extrachill_api_shop_products_update_args() {
 	return array(
-		'artist_id'         => array(
+		'artist_id'      => array(
 			'required'          => false,
 			'type'              => 'integer',
 			'sanitize_callback' => 'absint',
 			'validate_callback' => function( $value ) {
-				return $value === null || ( is_numeric( $value ) && (int) $value >= 0 );
+				return null === $value || ( is_numeric( $value ) && (int) $value >= 0 );
 			},
 		),
-		'status'            => array(
+		'status'         => array(
 			'required'          => false,
 			'type'              => 'string',
 			'enum'              => array( 'draft', 'publish' ),
 			'sanitize_callback' => 'sanitize_key',
 			'validate_callback' => 'rest_validate_request_arg',
 		),
-		'image_ids'         => array(
+		'image_ids'      => array(
 			'required'          => false,
 			'type'              => 'array',
 			'items'             => array( 'type' => 'integer' ),
 			'sanitize_callback' => function( $value ) {
-				if ( $value === null ) {
+				if ( null === $value ) {
 					return null;
 				}
 				if ( ! is_array( $value ) ) {
@@ -287,57 +287,57 @@ function extrachill_api_shop_products_update_args() {
 				return array_values( array_filter( array_map( 'absint', $value ) ) );
 			},
 		),
-		'name'              => array(
+		'name'           => array(
 			'required'          => false,
 			'type'              => 'string',
 			'sanitize_callback' => 'sanitize_text_field',
 		),
-		'price'             => array(
+		'price'          => array(
 			'required'          => false,
 			'type'              => 'number',
 			'validate_callback' => function( $value ) {
-				return $value === null || is_numeric( $value );
+				return null === $value || is_numeric( $value );
 			},
 		),
-		'sale_price'        => array(
+		'sale_price'     => array(
 			'required'          => false,
 			'type'              => 'number',
 			'validate_callback' => function( $value ) {
-				return $value === null || is_numeric( $value );
+				return null === $value || is_numeric( $value );
 			},
 		),
-		'description'       => array(
+		'description'    => array(
 			'required' => false,
 			'type'     => 'string',
 		),
-		'manage_stock'      => array(
+		'manage_stock'   => array(
 			'required'          => false,
 			'type'              => 'boolean',
 			'sanitize_callback' => 'rest_sanitize_boolean',
 		),
-		'stock_quantity'    => array(
+		'stock_quantity' => array(
 			'required'          => false,
 			'type'              => 'integer',
 			'sanitize_callback' => function( $value ) {
 				return is_numeric( $value ) ? (int) $value : null;
 			},
 			'validate_callback' => function( $value ) {
-				return $value === null || ( is_numeric( $value ) && (int) $value >= 0 );
+				return null === $value || ( is_numeric( $value ) && (int) $value >= 0 );
 			},
 		),
-		'image_id'          => array(
+		'image_id'       => array(
 			'required'          => false,
 			'type'              => 'integer',
 			'sanitize_callback' => function( $value ) {
 				return is_numeric( $value ) ? absint( $value ) : null;
 			},
 		),
-		'gallery_ids'       => array(
+		'gallery_ids'    => array(
 			'required'          => false,
 			'type'              => 'array',
 			'items'             => array( 'type' => 'integer' ),
 			'sanitize_callback' => function( $value ) {
-				if ( $value === null ) {
+				if ( null === $value ) {
 					return null;
 				}
 				if ( ! is_array( $value ) ) {
@@ -346,7 +346,7 @@ function extrachill_api_shop_products_update_args() {
 				return array_map( 'absint', $value );
 			},
 		),
-		'sizes'             => array(
+		'sizes'          => array(
 			'required'          => false,
 			'type'              => 'array',
 			'items'             => array(
@@ -357,7 +357,7 @@ function extrachill_api_shop_products_update_args() {
 				),
 			),
 			'sanitize_callback' => function( $value ) {
-				if ( $value === null ) {
+				if ( null === $value ) {
 					return null;
 				}
 				if ( ! is_array( $value ) ) {
@@ -371,7 +371,7 @@ function extrachill_api_shop_products_update_args() {
 				}, $value );
 			},
 		),
-		'ships_free'        => array(
+		'ships_free'     => array(
 			'required'          => false,
 			'type'              => 'boolean',
 			'sanitize_callback' => 'rest_sanitize_boolean',
@@ -383,6 +383,7 @@ function extrachill_api_shop_products_update_args() {
  * Permission check for collection routes (list, create).
  */
 function extrachill_api_shop_products_permission_check( WP_REST_Request $request ) {
+	unset( $request );
 	if ( ! is_user_logged_in() ) {
 		return new WP_Error(
 			'rest_forbidden',
@@ -452,6 +453,7 @@ function extrachill_api_shop_products_item_permission_check( WP_REST_Request $re
  * Wraps the extrachill/shop-list-products ability from extrachill-shop.
  */
 function extrachill_api_shop_products_list_handler( WP_REST_Request $request ) {
+	unset( $request );
 	$ability = wp_get_ability( 'extrachill/shop-list-products' );
 	if ( ! $ability ) {
 		return new WP_Error( 'ability_not_found', 'extrachill-shop plugin is required.', array( 'status' => 500 ) );
@@ -482,12 +484,12 @@ function extrachill_api_shop_products_create_handler( WP_REST_Request $request )
 		);
 	}
 
-	$description   = $request->get_param( 'description' );
-	$sale_price    = $request->get_param( 'sale_price' );
-	$manage_stock  = $request->get_param( 'manage_stock' );
+	$description    = $request->get_param( 'description' );
+	$sale_price     = $request->get_param( 'sale_price' );
+	$manage_stock   = $request->get_param( 'manage_stock' );
 	$stock_quantity = $request->get_param( 'stock_quantity' );
-	$image_id      = $request->get_param( 'image_id' );
-	$gallery_ids   = $request->get_param( 'gallery_ids' );
+	$image_id       = $request->get_param( 'image_id' );
+	$gallery_ids    = $request->get_param( 'gallery_ids' );
 
 	$product_id = wp_insert_post(
 		array(
@@ -587,7 +589,7 @@ function extrachill_api_shop_products_update_handler( WP_REST_Request $request )
 	}
 
 	$name = $request->get_param( 'name' );
-	if ( $name !== null ) {
+	if ( null !== $name ) {
 		wp_update_post(
 			array(
 				'ID'         => $product_id,
@@ -597,7 +599,7 @@ function extrachill_api_shop_products_update_handler( WP_REST_Request $request )
 	}
 
 	$description = $request->get_param( 'description' );
-	if ( $description !== null ) {
+	if ( null !== $description ) {
 		wp_update_post(
 			array(
 				'ID'           => $product_id,
@@ -607,13 +609,13 @@ function extrachill_api_shop_products_update_handler( WP_REST_Request $request )
 	}
 
 	$price = $request->get_param( 'price' );
-	if ( $price !== null && is_numeric( $price ) && (float) $price > 0 ) {
+	if ( null !== $price && is_numeric( $price ) && (float) $price > 0 ) {
 		update_post_meta( $product_id, '_regular_price', (string) $price );
 		update_post_meta( $product_id, '_price', (string) $price );
 	}
 
 	$image_ids = $request->get_param( 'image_ids' );
-	if ( $image_ids !== null ) {
+	if ( null !== $image_ids ) {
 		$reorder_result = extrachill_api_shop_products_set_image_order( $product_id, $image_ids );
 		if ( is_wp_error( $reorder_result ) ) {
 			return $reorder_result;
@@ -621,7 +623,7 @@ function extrachill_api_shop_products_update_handler( WP_REST_Request $request )
 	}
 
 	$sale_price = $request->get_param( 'sale_price' );
-	if ( $sale_price !== null ) {
+	if ( null !== $sale_price ) {
 		$current_regular = (float) get_post_meta( $product_id, '_regular_price', true );
 		if ( is_numeric( $sale_price ) && (float) $sale_price > 0 && (float) $sale_price < $current_regular ) {
 			update_post_meta( $product_id, '_sale_price', (string) $sale_price );
@@ -633,11 +635,11 @@ function extrachill_api_shop_products_update_handler( WP_REST_Request $request )
 	}
 
 	$manage_stock = $request->get_param( 'manage_stock' );
-	if ( $manage_stock !== null ) {
+	if ( null !== $manage_stock ) {
 		update_post_meta( $product_id, '_manage_stock', $manage_stock ? 'yes' : 'no' );
 		if ( $manage_stock ) {
 			$stock_quantity = $request->get_param( 'stock_quantity' );
-			if ( $stock_quantity !== null ) {
+			if ( null !== $stock_quantity ) {
 				update_post_meta( $product_id, '_stock', (string) absint( $stock_quantity ) );
 			}
 		} else {
@@ -646,7 +648,7 @@ function extrachill_api_shop_products_update_handler( WP_REST_Request $request )
 	}
 
 	$image_id = $request->get_param( 'image_id' );
-	if ( $image_id !== null ) {
+	if ( null !== $image_id ) {
 		if ( $image_id ) {
 			set_post_thumbnail( $product_id, absint( $image_id ) );
 		} else {
@@ -655,7 +657,7 @@ function extrachill_api_shop_products_update_handler( WP_REST_Request $request )
 	}
 
 	$gallery_ids = $request->get_param( 'gallery_ids' );
-	if ( $gallery_ids !== null ) {
+	if ( null !== $gallery_ids ) {
 		if ( is_array( $gallery_ids ) && ! empty( $gallery_ids ) ) {
 			$gallery_ids = array_map( 'absint', $gallery_ids );
 			$gallery_ids = array_filter( $gallery_ids );
@@ -667,13 +669,13 @@ function extrachill_api_shop_products_update_handler( WP_REST_Request $request )
 	}
 
 	$artist_id = $request->get_param( 'artist_id' );
-	if ( $artist_id !== null && extrachill_api_shop_user_can_manage_artist( $artist_id ) ) {
+	if ( null !== $artist_id && extrachill_api_shop_user_can_manage_artist( $artist_id ) ) {
 		update_post_meta( $product_id, '_artist_profile_id', $artist_id );
 		extrachill_api_shop_sync_artist_taxonomy( $product_id, $artist_id );
 	}
 
 	$sizes = $request->get_param( 'sizes' );
-	if ( $sizes !== null ) {
+	if ( null !== $sizes ) {
 		$current_price      = get_post_meta( $product_id, '_regular_price', true );
 		$current_sale_price = get_post_meta( $product_id, '_sale_price', true );
 		$variation_result   = extrachill_api_shop_setup_product_variations( $product_id, $sizes, $current_price, $current_sale_price );
@@ -683,7 +685,7 @@ function extrachill_api_shop_products_update_handler( WP_REST_Request $request )
 	}
 
 	$status = $request->get_param( 'status' );
-	if ( $status !== null ) {
+	if ( null !== $status ) {
 		$status_result = extrachill_api_shop_products_set_status( $product_id, $status );
 		if ( is_wp_error( $status_result ) ) {
 			return $status_result;
@@ -691,7 +693,7 @@ function extrachill_api_shop_products_update_handler( WP_REST_Request $request )
 	}
 
 	$ships_free = $request->get_param( 'ships_free' );
-	if ( $ships_free !== null ) {
+	if ( null !== $ships_free ) {
 		update_post_meta( $product_id, '_ships_free', $ships_free ? '1' : '0' );
 	}
 
@@ -765,7 +767,7 @@ function extrachill_api_shop_products_build_response( $product_id ) {
 			'id'  => $gid,
 			'url' => wp_get_attachment_image_url( $gid, 'thumbnail' ),
 		);
-		$images[] = array(
+		$images[]       = array(
 			'id'  => $gid,
 			'url' => wp_get_attachment_image_url( $gid, 'thumbnail' ),
 		);
@@ -783,30 +785,30 @@ function extrachill_api_shop_products_build_response( $product_id ) {
 		$stock_quantity = array_reduce( $sizes, function( $sum, $size ) {
 			return $sum + ( is_numeric( $size['stock'] ) ? (int) $size['stock'] : 0 );
 		}, 0 );
-		$manage_stock = true;
+		$manage_stock   = true;
 	} elseif ( $manage_stock ) {
-		$stock_quantity = $stock !== '' ? (int) $stock : 0;
+		$stock_quantity = '' !== $stock ? (int) $stock : 0;
 	}
 
 	return array(
-		'id'                => $product_id,
-		'name'              => $product_post->post_title,
-		'description'       => $product_post->post_content,
-		'price'             => $regular_price,
-		'sale_price'        => $sale_price,
-		'manage_stock'      => $manage_stock,
-		'stock_quantity'    => $stock_quantity,
-		'status'            => get_post_status( $product_id ),
-		'permalink'         => get_permalink( $product_id ),
-		'artist_id'         => $artist_id ? (int) $artist_id : null,
-		'image'             => array(
+		'id'             => $product_id,
+		'name'           => $product_post->post_title,
+		'description'    => $product_post->post_content,
+		'price'          => $regular_price,
+		'sale_price'     => $sale_price,
+		'manage_stock'   => $manage_stock,
+		'stock_quantity' => $stock_quantity,
+		'status'         => get_post_status( $product_id ),
+		'permalink'      => get_permalink( $product_id ),
+		'artist_id'      => $artist_id ? (int) $artist_id : null,
+		'image'          => array(
 			'id'  => $image_id,
 			'url' => $image_url,
 		),
-		'gallery'           => $gallery_urls,
-		'images'            => $images,
-		'sizes'             => $sizes,
-		'ships_free'        => '1' === get_post_meta( $product_id, '_ships_free', true ),
+		'gallery'        => $gallery_urls,
+		'images'         => $images,
+		'sizes'          => $sizes,
+		'ships_free'     => '1' === get_post_meta( $product_id, '_ships_free', true ),
 	);
 }
 
@@ -904,8 +906,8 @@ function extrachill_api_shop_products_can_publish( $product_id ) {
 	$stripe_status        = '';
 	try {
 		switch_to_blog( $artist_blog_id );
-		$stripe_account_id = (string) get_post_meta( $artist_id, '_stripe_connect_account_id', true );
-		$stripe_status     = (string) get_post_meta( $artist_id, '_stripe_connect_status', true );
+		$stripe_account_id    = (string) get_post_meta( $artist_id, '_stripe_connect_account_id', true );
+		$stripe_status        = (string) get_post_meta( $artist_id, '_stripe_connect_status', true );
 		$can_receive_payments = ( 'active' === $stripe_status );
 	} finally {
 		restore_current_blog();
@@ -1023,13 +1025,13 @@ function extrachill_api_shop_get_product_sizes( $product_id ) {
 			continue;
 		}
 
-		$term = get_term_by( 'slug', $size_attr, 'pa_size' );
+		$term      = get_term_by( 'slug', $size_attr, 'pa_size' );
 		$size_name = $term ? $term->name : $size_attr;
 
-		$stock = get_post_meta( $variation->ID, '_stock', true );
+		$stock   = get_post_meta( $variation->ID, '_stock', true );
 		$sizes[] = array(
 			'name'  => $size_name,
-			'stock' => $stock !== '' ? (int) $stock : 0,
+			'stock' => '' !== $stock ? (int) $stock : 0,
 		);
 	}
 
@@ -1104,7 +1106,7 @@ function extrachill_api_shop_setup_product_variations( $product_id, $sizes, $pri
 
 	$existing_by_size = array();
 	foreach ( $existing_variations as $var ) {
-		$size_attr = get_post_meta( $var->ID, 'attribute_pa_size', true );
+		$size_attr                      = get_post_meta( $var->ID, 'attribute_pa_size', true );
 		$existing_by_size[ $size_attr ] = $var->ID;
 	}
 
@@ -1152,7 +1154,7 @@ function extrachill_api_shop_setup_product_variations( $product_id, $sizes, $pri
 			update_post_meta( $variation_id, 'attribute_pa_size', $size_slug );
 		}
 
-		if ( $price !== null ) {
+		if ( null !== $price ) {
 			update_post_meta( $variation_id, '_regular_price', (string) $price );
 			$effective_price = $price;
 
@@ -1170,7 +1172,7 @@ function extrachill_api_shop_setup_product_variations( $product_id, $sizes, $pri
 		update_post_meta( $variation_id, '_stock', (string) $size_stock );
 		update_post_meta( $variation_id, '_stock_status', $size_stock > 0 ? 'instock' : 'outofstock' );
 
-		$menu_order++;
+		++$menu_order;
 	}
 
 	foreach ( $existing_by_size as $size_slug => $variation_id ) {

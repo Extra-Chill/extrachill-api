@@ -18,23 +18,23 @@ function extrachill_api_register_contact_submit_route() {
 		'callback'            => 'extrachill_api_handle_contact_submit',
 		'permission_callback' => ec_turnstile_permission_callback(),
 		'args'                => array(
-			'name' => array(
+			'name'               => array(
 				'required'          => true,
 				'type'              => 'string',
 				'sanitize_callback' => 'sanitize_text_field',
 			),
-			'email' => array(
+			'email'              => array(
 				'required'          => true,
 				'type'              => 'string',
 				'validate_callback' => 'is_email',
 				'sanitize_callback' => 'sanitize_email',
 			),
-			'subject' => array(
+			'subject'            => array(
 				'required'          => true,
 				'type'              => 'string',
 				'sanitize_callback' => 'sanitize_text_field',
 			),
-			'message' => array(
+			'message'            => array(
 				'required'          => true,
 				'type'              => 'string',
 				'sanitize_callback' => 'sanitize_textarea_field',

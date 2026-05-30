@@ -212,9 +212,9 @@ function extrachill_api_artist_roster_remove_member_handler( WP_REST_Request $re
 	}
 
 	return rest_ensure_response( array(
-		'removed'  => true,
-		'user_id'  => (int) $user_id,
-		'artist_id'=> (int) $artist_id,
+		'removed'   => true,
+		'user_id'   => (int) $user_id,
+		'artist_id' => (int) $artist_id,
 	) );
 }
 
@@ -225,8 +225,8 @@ function extrachill_api_artist_roster_remove_member_handler( WP_REST_Request $re
  * @return WP_REST_Response|WP_Error
  */
 function extrachill_api_artist_roster_cancel_invite_handler( WP_REST_Request $request ) {
-	$artist_id  = $request->get_param( 'id' );
-	$invite_id  = $request->get_param( 'invite_id' );
+	$artist_id = $request->get_param( 'id' );
+	$invite_id = $request->get_param( 'invite_id' );
 
 	if ( get_post_type( $artist_id ) !== 'artist_profile' ) {
 		return new WP_Error(

@@ -37,20 +37,20 @@ function extrachill_api_register_shop_orders_routes() {
 					'type'              => 'integer',
 					'sanitize_callback' => 'absint',
 				),
-				'status' => array(
+				'status'    => array(
 					'required'          => false,
 					'type'              => 'string',
 					'default'           => 'all',
 					'enum'              => array( 'all', 'needs_fulfillment', 'completed' ),
 					'sanitize_callback' => 'sanitize_key',
 				),
-				'page' => array(
+				'page'      => array(
 					'required'          => false,
 					'type'              => 'integer',
 					'default'           => 1,
 					'sanitize_callback' => 'absint',
 				),
-				'per_page' => array(
+				'per_page'  => array(
 					'required'          => false,
 					'type'              => 'integer',
 					'default'           => 20,
@@ -67,17 +67,17 @@ function extrachill_api_register_shop_orders_routes() {
 			'callback'            => 'extrachill_api_shop_orders_status_handler',
 			'permission_callback' => 'extrachill_api_shop_orders_item_permission_check',
 			'args'                => array(
-				'id' => array(
+				'id'              => array(
 					'required'          => true,
 					'type'              => 'integer',
 					'sanitize_callback' => 'absint',
 				),
-				'artist_id' => array(
+				'artist_id'       => array(
 					'required'          => true,
 					'type'              => 'integer',
 					'sanitize_callback' => 'absint',
 				),
-				'status' => array(
+				'status'          => array(
 					'required'          => true,
 					'type'              => 'string',
 					'enum'              => array( 'completed' ),
@@ -99,7 +99,7 @@ function extrachill_api_register_shop_orders_routes() {
 			'callback'            => 'extrachill_api_shop_orders_refund_handler',
 			'permission_callback' => 'extrachill_api_shop_orders_item_permission_check',
 			'args'                => array(
-				'id' => array(
+				'id'        => array(
 					'required'          => true,
 					'type'              => 'integer',
 					'sanitize_callback' => 'absint',
@@ -175,7 +175,7 @@ function extrachill_api_shop_orders_item_permission_check( WP_REST_Request $requ
 		);
 	}
 
-	$payouts = $order->get_meta( '_artist_payouts' ) ?: array();
+	$payouts = $order->get_meta( '_artist_payouts' ) ? $order->get_meta( '_artist_payouts' ) : array();
 	if ( ! isset( $payouts[ $artist_id ] ) ) {
 		return new WP_Error(
 			'rest_forbidden',
@@ -296,9 +296,9 @@ function extrachill_api_shop_order_ships_free_only( $artist_payout ) {
  * @return array Order data.
  */
 function extrachill_api_shop_orders_build_response( $order, $artist_id ) {
-	$payouts         = $order->get_meta( '_artist_payouts' ) ?: array();
+	$payouts         = $order->get_meta( '_artist_payouts' ) ? $order->get_meta( '_artist_payouts' ) : array();
 	$artist_payout   = $payouts[ $artist_id ] ?? array();
-	$tracking_number = $order->get_meta( '_artist_tracking_' . $artist_id ) ?: '';
+	$tracking_number = $order->get_meta( '_artist_tracking_' . $artist_id ) ? $order->get_meta( '_artist_tracking_' . $artist_id ) : '';
 
 	$items = array();
 	if ( ! empty( $artist_payout['items'] ) ) {

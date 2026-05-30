@@ -146,6 +146,6 @@ function extrachill_api_generate_qr_code( $request ) {
     return rest_ensure_response( array(
         'image_url' => $data_uri,
         'url'       => $result['url'] ?? $url,
-        'size'      => $result['size'] ?? ( $size ?: 1000 ),
+        'size'      => $result['size'] ?? ( $size ? $size : 1000 ),
     ) );
 }

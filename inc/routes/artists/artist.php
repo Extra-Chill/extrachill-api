@@ -25,12 +25,12 @@ function extrachill_api_register_artist_routes() {
 			'callback'            => 'extrachill_api_artist_post_handler',
 			'permission_callback' => 'extrachill_api_artist_create_permission_check',
 			'args'                => array(
-				'name' => array(
+				'name'       => array(
 					'required'          => true,
 					'type'              => 'string',
 					'sanitize_callback' => 'sanitize_text_field',
 				),
-				'bio' => array(
+				'bio'        => array(
 					'required'          => false,
 					'type'              => 'string',
 					'sanitize_callback' => 'wp_kses_post',
@@ -40,7 +40,7 @@ function extrachill_api_register_artist_routes() {
 					'type'              => 'string',
 					'sanitize_callback' => 'sanitize_text_field',
 				),
-				'genre' => array(
+				'genre'      => array(
 					'required'          => false,
 					'type'              => 'string',
 					'sanitize_callback' => 'sanitize_text_field',
@@ -81,6 +81,7 @@ function extrachill_api_register_artist_routes() {
  * Permission check for artist creation
  */
 function extrachill_api_artist_create_permission_check( WP_REST_Request $request ) {
+	unset( $request );
 	if ( ! is_user_logged_in() ) {
 		return new WP_Error(
 			'rest_forbidden',
@@ -185,7 +186,7 @@ function extrachill_api_artist_post_handler( WP_REST_Request $request ) {
 	$optional = array( 'bio', 'local_city', 'genre' );
 	foreach ( $optional as $field ) {
 		$value = $request->get_param( $field );
-		if ( $value !== null ) {
+		if ( null !== $value ) {
 			$input[ $field ] = $value;
 		}
 	}

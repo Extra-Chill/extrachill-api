@@ -67,7 +67,7 @@ function extrachill_api_register_community_taxonomy_counts_route() {
 function extrachill_api_community_taxonomy_counts_handler( WP_REST_Request $request ) {
 	$taxonomy = $request->get_param( 'taxonomy' );
 	$slug     = $request->get_param( 'slug' );
-	$limit    = $request->get_param( 'limit' ) ?: 8;
+	$limit    = $request->get_param( 'limit' ) ? $request->get_param( 'limit' ) : 8;
 
 	// Single term query — community-specific forum/topic lookup.
 	if ( ! empty( $slug ) ) {

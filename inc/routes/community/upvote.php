@@ -6,7 +6,7 @@
  * Delegates to business logic in extrachill-community plugin.
  */
 
-if (!defined('ABSPATH')) {
+if ( ! defined('ABSPATH') ) {
 	exit;
 }
 
@@ -28,10 +28,10 @@ function extrachill_api_register_community_upvote_route() {
 				},
 				'sanitize_callback' => 'absint',
 			),
-			'type' => array(
+			'type'    => array(
 				'required'          => true,
 				'type'              => 'string',
-				'enum'              => array('topic', 'reply'),
+				'enum'              => array( 'topic', 'reply' ),
 				'sanitize_callback' => 'sanitize_text_field',
 			),
 		),

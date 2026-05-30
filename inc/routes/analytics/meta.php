@@ -41,14 +41,18 @@ function extrachill_api_analytics_meta_handler() {
 	$table_name = extrachill_analytics_events_table();
 
 	// Get distinct event types.
+	// phpcs:disable WordPress.DB.PreparedSQL -- Table name from $wpdb->prefix, not user input.
 	$event_types = $wpdb->get_col(
 		"SELECT DISTINCT event_type FROM {$table_name} ORDER BY event_type ASC"
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL
 
 	// Get blogs that have events.
+	// phpcs:disable WordPress.DB.PreparedSQL -- Table name from $wpdb->prefix, not user input.
 	$blog_ids = $wpdb->get_col(
 		"SELECT DISTINCT blog_id FROM {$table_name} ORDER BY blog_id ASC"
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL
 
 	$blogs = array();
 	foreach ( $blog_ids as $blog_id ) {

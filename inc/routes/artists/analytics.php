@@ -20,7 +20,7 @@ function extrachill_api_register_artist_analytics_route() {
 		'callback'            => 'extrachill_api_artist_analytics_handler',
 		'permission_callback' => 'extrachill_api_artist_analytics_permission_check',
 		'args'                => array(
-			'id' => array(
+			'id'         => array(
 				'required'          => true,
 				'type'              => 'integer',
 				'sanitize_callback' => 'absint',
@@ -88,7 +88,7 @@ function extrachill_api_artist_analytics_handler( WP_REST_Request $request ) {
 	$input = array( 'id' => $request->get_param( 'id' ) );
 
 	$date_range = $request->get_param( 'date_range' );
-	if ( $date_range !== null ) {
+	if ( null !== $date_range ) {
 		$input['date_range'] = $date_range;
 	}
 

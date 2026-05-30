@@ -148,7 +148,7 @@ function extrachill_api_click_handler( WP_REST_Request $request ) {
 					'event_type' => 'share_click',
 					'event_data' => array(
 						'destination' => $share_destination,
-						'share_url'   => $normalized_destination ?: $source_url,
+						'share_url'   => $normalized_destination ? $normalized_destination : $source_url,
 					),
 					'source_url' => $source_url,
 				)

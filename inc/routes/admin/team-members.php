@@ -98,8 +98,8 @@ function extrachill_api_team_member_admin_permission_check() {
  * @return WP_REST_Response|WP_Error Response with user list or error.
  */
 function extrachill_api_get_team_members( $request ) {
-	$search = $request->get_param( 'search' );
-	$page   = $request->get_param( 'page' );
+	$search   = $request->get_param( 'search' );
+	$page     = $request->get_param( 'page' );
 	$per_page = 20;
 
 	$args = array(
@@ -165,6 +165,7 @@ function extrachill_api_get_team_members( $request ) {
  * @return WP_REST_Response|WP_Error Response with sync report or error.
  */
 function extrachill_api_sync_team_members( $request ) {
+	unset( $request );
 	$ability = wp_get_ability( 'extrachill/sync-team-members' );
 	if ( ! $ability ) {
 		return new WP_Error( 'ability_not_found', 'Team members ability is not available.', array( 'status' => 500 ) );

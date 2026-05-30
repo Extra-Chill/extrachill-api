@@ -46,6 +46,7 @@ function extrachill_api_register_user_subscriptions_routes() {
  * Permission check — must be logged in.
  */
 function extrachill_api_user_subscriptions_permission( WP_REST_Request $request ) {
+	unset( $request );
 	if ( ! is_user_logged_in() ) {
 		return new WP_Error(
 			'rest_forbidden',
@@ -60,6 +61,7 @@ function extrachill_api_user_subscriptions_permission( WP_REST_Request $request 
  * GET /users/me/subscriptions
  */
 function extrachill_api_user_subscriptions_get( WP_REST_Request $request ) {
+	unset( $request );
 	$ability = wp_get_ability( 'extrachill/get-subscriptions' );
 
 	if ( ! $ability ) {

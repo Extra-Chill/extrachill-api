@@ -99,6 +99,7 @@ function extrachill_api_register_user_settings_routes() {
  * Permission check — must be logged in.
  */
 function extrachill_api_user_settings_permission( WP_REST_Request $request ) {
+	unset( $request );
 	if ( ! is_user_logged_in() ) {
 		return new WP_Error(
 			'rest_forbidden',
@@ -113,6 +114,7 @@ function extrachill_api_user_settings_permission( WP_REST_Request $request ) {
  * GET /users/me/settings
  */
 function extrachill_api_user_settings_get( WP_REST_Request $request ) {
+	unset( $request );
 	$ability = wp_get_ability( 'extrachill/get-user-settings' );
 
 	if ( ! $ability ) {
