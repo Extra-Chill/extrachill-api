@@ -189,11 +189,21 @@ function extrachill_api_docs_info_collect_post_types() {
 			'public'        => (bool) $object->public,
 			'has_archive'   => (bool) $object->has_archive,
 			'hierarchical'  => (bool) $object->hierarchical,
-			'supports'      => is_array( $object->supports ) ? array_values( $object->supports ) : array(),
+			'supports'      => extrachill_api_docs_info_get_post_type_supports( $post_type ),
 			'publish_count' => $published_count,
 			'taxonomies'    => $tax_data,
 		);
 	}
 
 	return $data;
+}
+
+/**
+ * Gets a post type's supported features as a list of feature names.
+ *
+ * @param string $post_type Post type slug.
+ * @return array
+ */
+function extrachill_api_docs_info_get_post_type_supports( $post_type ) {
+	return array_keys( get_all_post_type_supports( $post_type ) );
 }
