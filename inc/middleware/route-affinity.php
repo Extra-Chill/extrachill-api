@@ -20,6 +20,30 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * Check whether a request is a trusted route-affinity re-entry.
+ *
+ * @param WP_REST_Request $request Request being dispatched.
+ * @return bool
+ */
+function extrachill_api_is_route_affinity_reentry( WP_REST_Request $request ) {
+	$remote_addr = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
+	if ( ! in_array( $remote_addr, array( '127.0.0.1', '::1' ), true ) ) {
+		return false;
+	}
+
+	$timestamp = (int) $request->get_header( 'X-EC-Affinity-Timestamp' );
+	$signature = $request->get_header( 'X-EC-Affinity-Signature' );
+	if ( ! $timestamp || ! $signature || abs( time() - $timestamp ) > 300 ) {
+		return false;
+	}
+
+	$payload  = strtoupper( $request->get_method() ) . "\n" . $request->get_route() . "\n" . $timestamp;
+	$expected = hash_hmac( 'sha256', $payload, wp_salt( 'auth' ) );
+
+	return hash_equals( $expected, $signature );
+}
+
+/**
  * Check if a REST request should be forwarded to another subsite.
  *
  * Hooked into `rest_pre_dispatch` — if the route belongs to a different site,
@@ -31,8 +55,8 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @return mixed Forwarded response or null to continue normal dispatch.
  */
 function extrachill_api_route_affinity_dispatch( $result, WP_REST_Server $server, WP_REST_Request $request ) {
-	// Don't intercept if already forwarded (prevent infinite loops).
-	if ( $request->get_header( 'X-EC-Forwarded' ) ) {
+	// Only a signed localhost request can suppress forwarding on re-entry.
+	if ( extrachill_api_is_route_affinity_reentry( $request ) ) {
 		return $result;
 	}
 
@@ -49,6 +73,9 @@ function extrachill_api_route_affinity_dispatch( $result, WP_REST_Server $server
 
 	// Determine which site this route belongs to.
 	$target_site = ec_get_route_site_affinity( $route );
+	if ( ! $target_site && '/' !== substr( $route, -1 ) ) {
+		$target_site = ec_get_route_site_affinity( $route . '/' );
+	}
 
 	if ( ! $target_site ) {
 		return $result; // No affinity — handle normally on current site.
@@ -71,9 +98,13 @@ function extrachill_api_route_affinity_dispatch( $result, WP_REST_Server $server
 	$path = substr( $route, strlen( '/extrachill/v1' ) );
 
 	// Build request args.
-	$args = array(
+	$timestamp = time();
+	$payload   = strtoupper( $method ) . "\n" . $route . "\n" . $timestamp;
+	$signature = hash_hmac( 'sha256', $payload, wp_salt( 'auth' ) );
+	$args      = array(
 		'headers' => array(
-			'X-EC-Forwarded' => '1', // Prevent infinite forwarding loops.
+			'X-EC-Affinity-Timestamp' => (string) $timestamp,
+			'X-EC-Affinity-Signature' => $signature,
 		),
 	);
 
@@ -119,14 +150,46 @@ function extrachill_api_route_affinity_dispatch( $result, WP_REST_Server $server
 	// site's full plugin stack, so the per-site ability is registered and the
 	// handler resolves correctly. This is precisely the documented use case for
 	// the loopback path. See Extra-Chill/extrachill-events#141.
-	$force_http_loopback = static function () {
+	$force_http_loopback     = static function () {
 		return true;
 	};
+	$forwarded_http_response = null;
+	$capture_http_response   = static function ( $http_response, $http_args ) use ( &$forwarded_http_response, $signature ) {
+		$headers = $http_args['headers'] ?? array();
+		if ( ( $headers['X-EC-Affinity-Signature'] ?? '' ) === $signature && false !== $http_response ) {
+			$forwarded_http_response = $http_response;
+		}
+
+		return $http_response;
+	};
 	add_filter( 'ec_cross_site_use_http_loopback', $force_http_loopback, 10, 0 );
+	add_filter( 'pre_http_request', $capture_http_response, PHP_INT_MAX, 2 );
+	add_filter( 'http_response', $capture_http_response, PHP_INT_MAX, 2 );
 
-	$response = ec_cross_site_rest_request( $target_site, $method, $path, $args );
+	try {
+		$response = ec_cross_site_rest_request( $target_site, $method, $path, $args );
+	} finally {
+		remove_filter( 'ec_cross_site_use_http_loopback', $force_http_loopback, 10 );
+		remove_filter( 'pre_http_request', $capture_http_response, PHP_INT_MAX );
+		remove_filter( 'http_response', $capture_http_response, PHP_INT_MAX );
+	}
 
-	remove_filter( 'ec_cross_site_use_http_loopback', $force_http_loopback, 10 );
+	if ( is_array( $forwarded_http_response ) ) {
+		$status  = wp_remote_retrieve_response_code( $forwarded_http_response );
+		$headers = wp_remote_retrieve_headers( $forwarded_http_response );
+		$body    = wp_remote_retrieve_body( $forwarded_http_response );
+		$data    = json_decode( $body, true );
+
+		if ( JSON_ERROR_NONE !== json_last_error() ) {
+			$data = $body;
+		}
+
+		if ( $headers instanceof Traversable ) {
+			$headers = iterator_to_array( $headers );
+		}
+
+		return new WP_REST_Response( $data, $status, is_array( $headers ) ? $headers : array() );
+	}
 
 	if ( is_wp_error( $response ) ) {
 		$status = $response->get_error_data()['status'] ?? 500;
