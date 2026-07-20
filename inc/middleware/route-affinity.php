@@ -20,6 +20,20 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
+ * Apply artist-site affinity to both collection and item routes.
+ *
+ * @param array $affinity_map Route prefix to site key map.
+ * @return array
+ */
+function extrachill_api_add_artist_route_affinity( $affinity_map ) {
+	unset( $affinity_map['/extrachill/v1/artists/'] );
+	$affinity_map['/extrachill/v1/artists'] = 'artist';
+
+	return $affinity_map;
+}
+add_filter( 'ec_route_site_affinity_map', 'extrachill_api_add_artist_route_affinity' );
+
+/**
  * Check whether a request is a trusted route-affinity re-entry.
  *
  * @param WP_REST_Request $request Request being dispatched.
@@ -73,9 +87,6 @@ function extrachill_api_route_affinity_dispatch( $result, WP_REST_Server $server
 
 	// Determine which site this route belongs to.
 	$target_site = ec_get_route_site_affinity( $route );
-	if ( ! $target_site && '/' !== substr( $route, -1 ) ) {
-		$target_site = ec_get_route_site_affinity( $route . '/' );
-	}
 
 	if ( ! $target_site ) {
 		return $result; // No affinity — handle normally on current site.

@@ -44,7 +44,6 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		$_SERVER['REMOTE_ADDR']     = '203.0.113.10';
 		$this->downstream_response  = $this->http_response( 200, array( 'ok' => true ) );
 
-		add_filter( 'ec_route_site_affinity_map', array( $this, 'affinity_map' ) );
 		add_filter( 'pre_http_request', array( $this, 'intercept_loopback' ), 10, 3 );
 	}
 
@@ -52,7 +51,6 @@ class Route_AffinityTest extends WP_UnitTestCase {
 	 * Restore global request state and filters.
 	 */
 	public function tear_down() {
-		remove_filter( 'ec_route_site_affinity_map', array( $this, 'affinity_map' ) );
 		remove_filter( 'pre_http_request', array( $this, 'intercept_loopback' ), 10 );
 
 		if ( null === $this->original_remote_addr ) {
@@ -146,6 +144,9 @@ class Route_AffinityTest extends WP_UnitTestCase {
 
 		$this->assertNull( $this->dispatch_affinity( $request ) );
 		$this->assertSame( 0, $this->request_count );
+
+		$request->set_route( '/extrachill/v1/artists/43' );
+		$this->assertFalse( extrachill_api_is_route_affinity_reentry( $request ) );
 	}
 
 	/**
@@ -170,15 +171,6 @@ class Route_AffinityTest extends WP_UnitTestCase {
 			'created'  => array( 201 ),
 			'accepted' => array( 202 ),
 		);
-	}
-
-	/**
-	 * Supply a controlled route map.
-	 *
-	 * @return array<string, string>
-	 */
-	public function affinity_map() {
-		return array( '/extrachill/v1/artists/' => 'artist' );
 	}
 
 	/**
