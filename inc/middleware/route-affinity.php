@@ -35,19 +35,11 @@ add_filter( 'ec_route_site_affinity_map', 'extrachill_api_add_artist_route_affin
 /**
  * Normalize structured request data before hashing it.
  *
- * Query values are stringified because HTTP query parsing does not preserve
- * scalar types. JSON body values retain their types.
- *
- * @param mixed $value             Value to normalize.
- * @param bool  $stringify_scalars Whether scalar values should become strings.
+ * @param mixed $value Value to normalize.
  * @return mixed
  */
-function extrachill_api_normalize_affinity_data( $value, $stringify_scalars = false ) {
+function extrachill_api_normalize_affinity_data( $value ) {
 	if ( ! is_array( $value ) ) {
-		if ( $stringify_scalars && ( is_scalar( $value ) || null === $value ) ) {
-			return (string) $value;
-		}
-
 		return $value;
 	}
 
@@ -57,10 +49,27 @@ function extrachill_api_normalize_affinity_data( $value, $stringify_scalars = fa
 	}
 
 	foreach ( $value as $key => $item ) {
-		$value[ $key ] = extrachill_api_normalize_affinity_data( $item, $stringify_scalars );
+		$value[ $key ] = extrachill_api_normalize_affinity_data( $item );
 	}
 
 	return $value;
+}
+
+/**
+ * Canonicalize query input exactly as the cross-site HTTP hop transmits it.
+ *
+ * The helper uses http_build_query(), and the target PHP request parses that
+ * wire string before WordPress exposes query parameters. Replaying both steps
+ * preserves false-as-0 while omitting null and empty arrays at every depth.
+ *
+ * @param array $query Query parameters before transport.
+ * @return array
+ */
+function extrachill_api_canonicalize_affinity_query( $query ) {
+	$canonical = array();
+	parse_str( http_build_query( $query ), $canonical );
+
+	return extrachill_api_normalize_affinity_data( $canonical );
 }
 
 /**
@@ -76,7 +85,7 @@ function extrachill_api_normalize_affinity_data( $value, $stringify_scalars = fa
  * @return string
  */
 function extrachill_api_route_affinity_payload( $method, $route, $target_host, $query, $body, $timestamp, $nonce ) {
-	$query_digest = hash( 'sha256', wp_json_encode( extrachill_api_normalize_affinity_data( $query, true ) ) );
+	$query_digest = hash( 'sha256', wp_json_encode( extrachill_api_canonicalize_affinity_query( $query ) ) );
 	$body_digest  = hash( 'sha256', wp_json_encode( extrachill_api_normalize_affinity_data( $body ) ) );
 
 	return implode(

@@ -168,6 +168,42 @@ class Route_AffinityTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Typed query input signs the exact helper wire representation.
+	 *
+	 * @dataProvider typed_query_provider
+	 * @param array $source_query Query input supplied to the helper.
+	 * @param array $target_query Query shape parsed on the target.
+	 */
+	public function test_typed_query_matches_real_helper_wire_shape( $source_query, $target_query ) {
+		$source = new WP_REST_Request( 'GET', '/extrachill/v1/artists/42' );
+		$source->set_query_params( $source_query );
+		$this->dispatch_affinity( $source );
+
+		$reentry = $this->reentry_request( $source );
+		$this->assertSame( $target_query, $reentry->get_query_params() );
+		$this->assertNull( $this->dispatch_affinity( $reentry ) );
+		$this->assertSame( 1, $this->request_count );
+	}
+
+	/**
+	 * A valid token remains bound to both target header and HTTP host.
+	 */
+	public function test_valid_token_rejects_altered_target_host_binding() {
+		$source = new WP_REST_Request( 'GET', '/extrachill/v1/artists/42' );
+		$this->dispatch_affinity( $source );
+		$reentry       = $this->reentry_request( $source );
+		$original_host = $this->last_http_args['headers']['Host'];
+
+		$_SERVER['HTTP_HOST'] = 'wrong.example.com';
+		$this->assert_reentry_rejected( $reentry );
+
+		$_SERVER['HTTP_HOST'] = $original_host;
+		$reentry->set_header( 'X-EC-Affinity-Target', 'wrong.example.com' );
+		$this->assert_reentry_rejected( $reentry );
+		$this->assertSame( 1, $this->request_count );
+	}
+
+	/**
 	 * A valid signed hop is accepted once and prevents recursive forwarding.
 	 */
 	public function test_valid_reentry_is_single_use_and_prevents_recursion() {
@@ -290,6 +326,62 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		return array(
 			'created'  => array( 201 ),
 			'accepted' => array( 202 ),
+		);
+	}
+
+	/**
+	 * Typed query values and their post-wire target forms.
+	 *
+	 * @return array<string, array{array, array}>
+	 */
+	public function typed_query_provider() {
+		return array(
+			'false becomes zero'  => array(
+				array( 'value' => false ),
+				array( 'value' => '0' ),
+			),
+			'null is omitted'     => array(
+				array( 'value' => null ),
+				array(),
+			),
+			'empty array omitted' => array(
+				array( 'value' => array() ),
+				array(),
+			),
+			'nested values'       => array(
+				array(
+					'value' => array(
+						'false' => false,
+						'null'  => null,
+						'empty' => array(),
+						'zero'  => 0,
+						'true'  => true,
+						'text'  => 'x',
+					),
+				),
+				array(
+					'value' => array(
+						'false' => '0',
+						'zero'  => '0',
+						'true'  => '1',
+						'text'  => 'x',
+					),
+				),
+			),
+			'ordinary scalars'    => array(
+				array(
+					'string'  => 'one',
+					'integer' => 2,
+					'float'   => 2.5,
+					'true'    => true,
+				),
+				array(
+					'string'  => 'one',
+					'integer' => '2',
+					'float'   => '2.5',
+					'true'    => '1',
+				),
+			),
 		);
 	}
 
