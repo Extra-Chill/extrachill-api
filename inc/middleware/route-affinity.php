@@ -114,13 +114,18 @@ function extrachill_api_route_affinity_request_body( WP_REST_Request $request ) 
 	}
 
 	$body = $request->get_json_params();
-	if ( ! empty( $body ) ) {
-		return $body;
+	if ( empty( $body ) ) {
+		$body = $request->get_body_params();
 	}
+	$body = ! empty( $body ) ? $body : array();
 
-	$body = $request->get_body_params();
-
-	return ! empty( $body ) ? $body : array();
+	/**
+	 * Filters the signed body representation for transport-only request data.
+	 *
+	 * @param array           $body    Parsed request body.
+	 * @param WP_REST_Request $request Request being forwarded or verified.
+	 */
+	return apply_filters( 'extrachill_api_route_affinity_signature_body', $body, $request );
 }
 
 /**
@@ -187,7 +192,12 @@ function extrachill_api_is_route_affinity_reentry( WP_REST_Request $request ) {
 	// Persistent object caches make this single-use across loopback workers.
 	// Without one, localhost and the five-minute signature window remain the
 	// residual replay boundary.
-	return wp_cache_add( 'route_affinity_' . hash( 'sha256', $nonce ), 1, 'extrachill_api', 300 );
+	$verified = wp_cache_add( 'route_affinity_' . hash( 'sha256', $nonce ), 1, 'extrachill_api', 300 );
+	if ( $verified ) {
+		$request->set_header( 'X-EC-Affinity-Verified', '1' );
+	}
+
+	return $verified;
 }
 
 /**
@@ -314,7 +324,20 @@ function extrachill_api_route_affinity_dispatch( $result, WP_REST_Server $server
 	add_filter( 'http_response', $capture_http_response, PHP_INT_MAX, 2 );
 
 	try {
-		$response = ec_cross_site_rest_request( $target_site, $method, $path, $args );
+		/**
+		 * Allows a route owner to preserve admitted files over the HTTP hop.
+		 * A null result falls through to the standard JSON transport.
+		 *
+		 * @param mixed           $response    Forwarded result or null.
+		 * @param string          $target_site Target site key.
+		 * @param string          $path        Namespace-relative path.
+		 * @param array           $args        Signed forwarding arguments.
+		 * @param WP_REST_Request $request     Original request.
+		 */
+		$response = apply_filters( 'extrachill_api_route_affinity_file_forward', null, $target_site, $path, $args, $request );
+		if ( null === $response ) {
+			$response = ec_cross_site_rest_request( $target_site, $method, $path, $args );
+		}
 	} finally {
 		remove_filter( 'ec_cross_site_use_http_loopback', $force_http_loopback, 10 );
 		remove_filter( 'pre_http_request', $capture_http_response, PHP_INT_MAX );
