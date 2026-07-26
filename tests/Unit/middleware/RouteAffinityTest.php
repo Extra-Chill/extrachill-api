@@ -183,6 +183,58 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		$this->assert_reentry_rejected( $reentry );
 	}
 
+	/** A protected stream range is forwarded only when bound to the signature. */
+	public function test_private_stream_range_is_signed_and_tamper_proof() {
+		$request = new WP_REST_Request( 'GET', '/extrachill/v1/events/bookings/12/attachments/34/download' );
+		$request->set_header( 'Range', 'bytes=2-5' );
+		$this->downstream_response = $this->raw_http_response(
+			206,
+			'vate',
+			array(
+				'Content-Length'            => '4',
+				'Content-Type'              => 'text/plain',
+				'Content-Disposition'       => 'attachment; filename="rider.txt"',
+				'Content-Range'             => 'bytes 2-5/10',
+				'X-EC-Download-Correlation' => wp_generate_uuid4(),
+			)
+		);
+		$response = $this->dispatch_affinity( $request );
+
+		$this->assertSame( 206, $response->get_status() );
+		$this->assertNull( $response->get_data() );
+		$this->assertSame( 'bytes=2-5', $this->last_http_args['headers']['range'] );
+		$this->assertTrue( $this->last_http_args['stream'] );
+		$this->assertSame( extrachill_api_booking_attachment_max_bytes() + 1, $this->last_http_args['limit_response_size'] );
+		$spool = $this->last_http_args['filename'];
+		$this->assertFileExists( $spool );
+
+		$reentry = $this->reentry_request( $request );
+		$reentry->set_header( 'Range', 'bytes=3-6' );
+		$this->assert_reentry_rejected( $reentry );
+
+		ob_start();
+		$this->assertTrue( extrachill_api_serve_private_stream( false, $response, $request, rest_get_server() ) );
+		$this->assertSame( 'vate', ob_get_clean() );
+		$this->assertFileDoesNotExist( $spool );
+	}
+
+	/** Downstream private errors are generic and their spooled bodies are deleted. */
+	public function test_private_stream_error_does_not_relay_internal_references() {
+		wp_set_current_user( self::factory()->user->create() );
+		$this->downstream_response = $this->raw_http_response(
+			403,
+			'{"storage_reference":"secret","path":"/private/root"}',
+			array( 'Content-Type' => 'application/json' )
+		);
+		$response = $this->dispatch_affinity( new WP_REST_Request( 'GET', '/extrachill/v1/events/bookings/12/attachments/34/download' ) );
+		$spool    = $this->last_http_args['filename'];
+
+		$this->assertWPError( $response );
+		$this->assertSame( 404, $response->get_error_data()['status'] );
+		$this->assertStringNotContainsString( 'secret', wp_json_encode( $response->get_error_data() ) );
+		$this->assertFileDoesNotExist( $spool );
+	}
+
 	/**
 	 * Typed query input signs the exact helper wire representation.
 	 *
@@ -417,6 +469,11 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		++$this->request_count;
 		$this->last_http_args = $args;
 		$this->last_http_url  = $url;
+		if ( ! empty( $args['stream'] ) && is_array( $this->downstream_response ) ) {
+			file_put_contents( $args['filename'], $this->downstream_response['body'] );
+			$this->downstream_response['body']     = '';
+			$this->downstream_response['filename'] = $args['filename'];
+		}
 
 		return $this->downstream_response;
 	}
@@ -524,6 +581,20 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		return array(
 			'headers'  => $headers,
 			'body'     => wp_json_encode( $body ),
+			'response' => array(
+				'code'    => $status,
+				'message' => '',
+			),
+			'cookies'  => array(),
+			'filename' => null,
+		);
+	}
+
+	/** Build a raw byte HTTP response fixture. */
+	private function raw_http_response( $status, $body, $headers = array() ) {
+		return array(
+			'headers'  => $headers,
+			'body'     => $body,
 			'response' => array(
 				'code'    => $status,
 				'message' => '',
