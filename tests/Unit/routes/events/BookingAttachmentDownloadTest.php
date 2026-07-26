@@ -75,6 +75,8 @@ namespace {
 		public function tear_down() {
 			extrachill_api_cleanup_private_streams();
 			remove_filter( 'extrachill_api_rate_limit_store', array( $this, 'use_test_rate_limit_store' ) );
+			remove_all_filters( 'extrachill_api_private_affinity_stream' );
+			remove_all_filters( 'extrachill_api_booking_attachment_max_bytes' );
 			foreach ( $this->registered_abilities as $name ) {
 				wp_unregister_ability( $name );
 			}
@@ -326,6 +328,82 @@ namespace {
 				$this->assertWPError( $invalid, $content_range );
 				$this->assertFileDoesNotExist( $invalid_path );
 			}
+		}
+
+		/** Every post-consumption spool failure records one terminal failed outcome. */
+		public function test_affinity_spool_failures_finalize_consumed_handoff() {
+			$nonce    = wp_generate_uuid4();
+			$delivery = array(
+				'booking_id'      => 10,
+				'attachment_id'   => 2,
+				'correlation_id'  => '11111111-1111-4111-8111-111111111110',
+				'success_outcome' => 'completed',
+			);
+			$delivery_headers = extrachill_api_booking_attachment_affinity_delivery_headers( $delivery, array( 'nonce' => $nonce ) );
+			$cases            = array(
+				'missing spool'           => array( '/tmp/missing-booking-spool-' . wp_generate_uuid4(), array( 'Content-Length' => '4' ), null ),
+				'mismatched length'       => array( null, array( 'Content-Length' => '5' ), null ),
+				'malformed content range' => array( null, array( 'Content-Length' => '4', 'Content-Range' => 'private-range' ), null ),
+				'inconsistent range total' => array( null, array( 'Content-Length' => '4', 'Content-Range' => 'bytes 6-9/8' ), null ),
+				'spool open failure'      => array( null, array( 'Content-Length' => '4' ), 'fail_open' ),
+			);
+
+			foreach ( $cases as $label => $case ) {
+				$path = $case[0] ?: wp_tempnam( 'booking-affinity-failure' );
+				if ( null === $case[0] ) {
+					file_put_contents( $path, 'part' );
+				}
+				if ( 'fail_open' === $case[2] ) {
+					add_filter(
+						'extrachill_api_private_affinity_stream',
+						static function ( $stream ) {
+							if ( is_resource( $stream ) ) {
+								fclose( $stream );
+							}
+							return false;
+						}
+					);
+				}
+				$before = count( $this->delivery_outcomes );
+				$result = extrachill_api_private_stream_from_affinity_response(
+					array(
+						'headers'  => array_merge( $case[1], $delivery_headers ),
+						'body'     => '',
+						'response' => array( 'code' => isset( $case[1]['Content-Range'] ) ? 206 : 200 ),
+					),
+					$path,
+					$nonce
+				);
+				remove_all_filters( 'extrachill_api_private_affinity_stream' );
+
+				$this->assertWPError( $result, $label );
+				$this->assertSame( 502, $result->get_error_data()['status'], $label );
+				$this->assertCount( $before + 1, $this->delivery_outcomes, $label );
+				$this->assertSame( 'failed', $this->delivery_outcomes[ $before ]['outcome'], $label );
+				$this->assertSame( 0, $this->delivery_outcomes[ $before ]['bytes_sent'], $label );
+				$this->assertFileDoesNotExist( $path, $label );
+			}
+
+			$oversized = wp_tempnam( 'booking-affinity-oversized' );
+			file_put_contents( $oversized, 'part' );
+			add_filter( 'extrachill_api_booking_attachment_max_bytes', array( $this, 'one_byte_limit' ) );
+			$before = count( $this->delivery_outcomes );
+			$result = extrachill_api_private_stream_from_affinity_response(
+				array(
+					'headers'  => array_merge( array( 'Content-Length' => '4' ), $delivery_headers ),
+					'body'     => '',
+					'response' => array( 'code' => 200 ),
+				),
+				$oversized,
+				$nonce
+			);
+			remove_filter( 'extrachill_api_booking_attachment_max_bytes', array( $this, 'one_byte_limit' ) );
+
+			$this->assertWPError( $result, 'oversized spool' );
+			$this->assertCount( $before + 1, $this->delivery_outcomes );
+			$this->assertSame( 'failed', $this->delivery_outcomes[ $before ]['outcome'] );
+			$this->assertSame( 0, $this->delivery_outcomes[ $before ]['bytes_sent'] );
+			$this->assertFileDoesNotExist( $oversized );
 		}
 
 		/** Affinity target spooling is non-terminal; only outer client serving completes delivery. */

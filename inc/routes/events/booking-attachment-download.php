@@ -642,11 +642,7 @@ function extrachill_api_private_stream_from_affinity_response( array $http_respo
 	$headers  = $headers instanceof Traversable ? iterator_to_array( $headers ) : (array) $headers;
 	$delivery = extrachill_api_booking_attachment_affinity_delivery_from_headers( $headers, $nonce );
 	if ( ! in_array( $status, array( 200, 206 ), true ) ) {
-		extrachill_api_discard_private_affinity_spool( $path );
-		if ( is_array( $delivery ) ) {
-			extrachill_api_record_booking_attachment_delivery( $delivery, 'failed', 0 );
-		}
-		return extrachill_api_booking_attachment_download_error( extrachill_api_booking_attachment_proxy_status( $status ) );
+		return extrachill_api_fail_private_affinity_stream( $path, $delivery, extrachill_api_booking_attachment_proxy_status( $status ) );
 	}
 	if ( ! is_array( $delivery ) ) {
 		extrachill_api_discard_private_affinity_spool( $path );
@@ -655,14 +651,12 @@ function extrachill_api_private_stream_from_affinity_response( array $http_respo
 
 	$size = is_file( $path ) ? filesize( $path ) : false;
 	if ( false === $size || $size > extrachill_api_booking_attachment_max_bytes() ) {
-		extrachill_api_discard_private_affinity_spool( $path );
-		return extrachill_api_booking_attachment_download_error( 502 );
+		return extrachill_api_fail_private_affinity_stream( $path, $delivery );
 	}
 
 	$declared = isset( $headers['content-length'] ) ? (int) $headers['content-length'] : ( isset( $headers['Content-Length'] ) ? (int) $headers['Content-Length'] : -1 );
 	if ( $declared !== (int) $size ) {
-		extrachill_api_discard_private_affinity_spool( $path );
-		return extrachill_api_booking_attachment_download_error( 502 );
+		return extrachill_api_fail_private_affinity_stream( $path, $delivery );
 	}
 
 	$disposition = (string) ( $headers['content-disposition'] ?? ( $headers['Content-Disposition'] ?? '' ) );
@@ -672,26 +666,38 @@ function extrachill_api_private_stream_from_affinity_response( array $http_respo
 	if ( 206 === $status ) {
 		$content_range = (string) ( $headers['content-range'] ?? ( $headers['Content-Range'] ?? '' ) );
 		if ( 1 !== preg_match( '/^bytes (\d+)-(\d+)\/(\d+)$/', $content_range, $range ) ) {
-			extrachill_api_discard_private_affinity_spool( $path );
-			return extrachill_api_booking_attachment_download_error( 502 );
+			return extrachill_api_fail_private_affinity_stream( $path, $delivery );
 		}
 		$start = (int) $range[1];
 		$end   = (int) $range[2];
 		$total = (int) $range[3];
 		if ( $total < 1 || $start < 0 || $start > $end || $end >= $total || $end - $start + 1 !== (int) $size || $total > extrachill_api_booking_attachment_max_bytes() ) {
-			extrachill_api_discard_private_affinity_spool( $path );
-			return extrachill_api_booking_attachment_download_error( 502 );
+			return extrachill_api_fail_private_affinity_stream( $path, $delivery );
 		}
 		$safe['Content-Range'] = $content_range;
 	}
 
 	$stream = fopen( $path, 'rb' );
+	$stream = apply_filters( 'extrachill_api_private_affinity_stream', $stream, $path );
 	if ( false === $stream ) {
-		extrachill_api_discard_private_affinity_spool( $path );
-		return extrachill_api_booking_attachment_download_error( 502 );
+		return extrachill_api_fail_private_affinity_stream( $path, $delivery );
 	}
 
 	return extrachill_api_register_private_stream( $stream, $size, $status, $safe, $path, $delivery );
+}
+
+/** Finalize a consumed handoff without exposing callback or spool failures. */
+function extrachill_api_fail_private_affinity_stream( $path, $delivery, $status = 502 ) {
+	if ( is_array( $delivery ) ) {
+		try {
+			extrachill_api_record_booking_attachment_delivery( $delivery, 'failed', 0 );
+		} catch ( Throwable $throwable ) {
+			unset( $throwable );
+		}
+	}
+	extrachill_api_discard_private_affinity_spool( $path );
+
+	return extrachill_api_booking_attachment_download_error( $status );
 }
 
 /** Extract and sanitize only a presentation filename from Content-Disposition. */
