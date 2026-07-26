@@ -6,7 +6,7 @@ The API plugin owns only protected HTTP admission and byte transport. Extra Chil
 
 `POST /wp-json/extrachill/v1/venues/{venue}/booking-inquiries`
 
-Anonymous, cookie-authenticated, and bearer-authenticated callers use the same Turnstile and rate-limit admission. Authentication is optional. When WordPress has validated a caller, Events reads that canonical current user from request context. Form fields such as `user_id`, `submitter_user_id`, and `uploader_user_id` are rejected and never become authority.
+Anonymous, cookie-authenticated, and bearer-authenticated callers use the same Turnstile and atomic fixed-window rate-limit admission. Authentication is optional. When WordPress has validated a caller, Events reads that canonical current user from request context. Multipart and JSON affinity hops use the same signed internal-user transport. Form fields such as `user_id`, `submitter_user_id`, and `uploader_user_id` are rejected and never become authority.
 
 JSON requests provide the inquiry fields directly. Multipart requests provide `intake` and `attachment_purposes` as JSON strings plus up to five `attachments[]` files. Transport limits are 20 MiB per file and 50 MiB in aggregate. Events applies the authoritative filename, MIME, purpose, scan, storage, and venue policy.
 
@@ -18,7 +18,7 @@ An exact retry with the same `idempotency_key`, fields, and ordered attachment b
 
 The caller must be authenticated and currently authorized by Events for the booking's exact venue. The API issues and consumes an Events-owned one-time handoff, supports one byte range, and streams at most 20 MiB. `HEAD` and REST `_envelope` requests cannot consume a handoff.
 
-Success is `200` or `206` with `Content-Disposition`, `Content-Length`, `Content-Type`, `Accept-Ranges`, `X-EC-Download-Correlation`, and private `no-store` headers. The correlation is issued by Events and is not accepted from clients. Every consumed handoff records `completed`, `failed`, `interrupted`, or `partial` against that correlation. Route-affinity spools are mode `0600`, bounded, and removed after serving, failure, interruption, or shutdown.
+Success is `200` or `206` with `Content-Disposition`, `Content-Length`, `Content-Type`, `Accept-Ranges`, and private `no-store` headers. The Events correlation is never exposed publicly or accepted from clients. For an affinity hop, nonce-bound internal response metadata transfers it to the outer worker and is stripped before the client response. Only that client-facing worker records `completed`, `failed`, `interrupted`, or `partial` after the actual stream outcome. Route-affinity spools are mode `0600`, bounded, and removed after serving, failure, interruption, or shutdown.
 
 ## Stable Errors
 
@@ -46,4 +46,4 @@ Success is `200` or `206` with `Content-Disposition`, `Content-Length`, `Content
 | Unknown inquiry failure | `booking_inquiry_unavailable` | 503 | Keep the draft and retry later. |
 | Unknown download failure | `booking_attachment_download_unavailable` | 502 or 503 | Retry later without exposing transport internals. |
 
-Errors and logs must never contain temporary paths, storage roots, hashes, storage or object references, handoff tokens, internal identities, or private bytes.
+Only the explicit code/message/status/field contracts above are forwarded. An unknown domain error is always `booking_inquiry_unavailable` (`503`) regardless of its original status. Errors and logs must never contain temporary paths, storage roots, hashes, storage or object references, handoff tokens, delivery correlations, internal identities, or private bytes.

@@ -17,11 +17,16 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 	/** @var array */
 	private $temporary_files = array();
 
+	/** @var array<string, int> */
+	private $rate_counts = array();
+
 	public function set_up() {
 		parent::set_up();
 		$this->ability_inputs  = array();
 		$this->ability_actor_ids = array();
 		$this->temporary_files = array();
+		$this->rate_counts     = array();
+		add_filter( 'extrachill_api_rate_limit_store', array( $this, 'use_test_rate_limit_store' ) );
 		if ( isset( wp_get_abilities()[ EXTRACHILL_API_BOOKING_ABILITY ] ) ) {
 			wp_unregister_ability( EXTRACHILL_API_BOOKING_ABILITY );
 		}
@@ -34,6 +39,7 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 		remove_all_filters( 'extrachill_bypass_turnstile_verification' );
 		remove_all_filters( 'extrachill_api_booking_inquiry_rate_limit' );
 		remove_all_filters( 'extrachill_api_allow_test_booking_file' );
+		remove_filter( 'extrachill_api_rate_limit_store', array( $this, 'use_test_rate_limit_store' ) );
 		foreach ( $this->temporary_files as $file ) {
 			if ( file_exists( $file ) ) {
 				unlink( $file );
@@ -132,7 +138,8 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 		$this->assertWPError( $result );
 		$this->assertSame( 'public_write_rate_limited', $result->get_error_code() );
 		$this->assertSame( 429, $result->get_error_data()['status'] );
-		$this->assertSame( '60', $result->get_error_data()['headers']['Retry-After'] );
+		$this->assertGreaterThanOrEqual( 1, (int) $result->get_error_data()['headers']['Retry-After'] );
+		$this->assertLessThanOrEqual( 60, (int) $result->get_error_data()['headers']['Retry-After'] );
 	}
 
 	public function test_booking_error_headers_are_allowlisted_and_removed_from_json() {
@@ -155,12 +162,49 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 		$this->assertArrayNotHasKey( 'headers', $response->get_data()['data'] );
 	}
 
-	public function test_unsigned_remote_address_is_not_trusted() {
-		$request = $this->valid_request();
-		$request->set_param( '_ec_affinity_remote_addr', '203.0.113.99' );
+	public function test_spoofed_affinity_context_cannot_bypass_the_direct_client_cap() {
+		$spoofed = $this->valid_request();
+		$spoofed->set_header( 'X-EC-Affinity-Verified', '1' );
+		$spoofed->set_header( 'X-EC-Affinity-Client', str_repeat( 'a', 64 ) );
+		$spoofed->set_param( '_ec_affinity_client', str_repeat( 'b', 64 ) );
+		$spoofed->set_param( '_ec_affinity_remote_addr', '203.0.113.99' );
 
+		$scope = 'booking-spoof-' . wp_generate_uuid4();
+		$this->assertTrue( extrachill_api_check_public_write_rate_limit( $spoofed, $scope, 1 ) );
+		$blocked = extrachill_api_check_public_write_rate_limit( $this->valid_request(), $scope, 1 );
+
+		$this->assertWPError( $blocked );
+		$this->assertSame( 'public_write_rate_limited', $blocked->get_error_code() );
+		$this->assertSame( array(), extrachill_api_route_affinity_context( $spoofed ) );
 		$this->assertNotSame( '203.0.113.99', $_SERVER['REMOTE_ADDR'] );
-		$this->assertNotSame( '1', $request->get_header( 'X-EC-Affinity-Verified' ) );
+	}
+
+	public function test_turnstile_remote_ip_uses_only_verified_affinity_context() {
+		$observed = array();
+		$observe  = static function () use ( &$observed ) {
+			$observed[] = $_SERVER['REMOTE_ADDR'] ?? '';
+			return true;
+		};
+		add_filter( 'extrachill_bypass_turnstile_verification', $observe );
+		$direct = $this->valid_request();
+		$direct->set_header( 'X-EC-Affinity-Verified', '1' );
+		$direct->set_param( '_ec_affinity_remote_addr', '203.0.113.99' );
+		$this->assertTrue( extrachill_api_booking_inquiry_permission( $direct ) );
+
+		$verified = $this->valid_request();
+		extrachill_api_set_route_affinity_context(
+			$verified,
+			array(
+				'client'      => str_repeat( 'a', 64 ),
+				'remote_addr' => '203.0.113.88',
+				'nonce'       => wp_generate_uuid4(),
+			)
+		);
+		$this->assertTrue( extrachill_api_booking_inquiry_permission( $verified ) );
+		remove_filter( 'extrachill_bypass_turnstile_verification', $observe );
+
+		$this->assertSame( array( $_SERVER['REMOTE_ADDR'], '203.0.113.88' ), $observed );
+		$this->assertNotSame( '203.0.113.88', $_SERVER['REMOTE_ADDR'] );
 	}
 
 	public function test_duplicate_retry_preserves_exact_ability_input() {
@@ -213,7 +257,7 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 		$request->set_file_params( array( 'attachments' => $file ) );
 		$request->set_param( 'attachment_purposes', array( 'press_release' ) );
 		$request->set_param( EXTRACHILL_API_BOOKING_FILES, wp_json_encode( array( array( 'name' => 'press.txt', 'size' => 1, 'purpose' => 'press_release', 'hash' => str_repeat( 'a', 64 ) ) ) ) );
-		$request->set_header( 'X-EC-Affinity-Verified', '1' );
+		extrachill_api_set_route_affinity_context( $request, array( 'nonce' => wp_generate_uuid4() ) );
 
 		$result = extrachill_api_normalize_booking_files( $request );
 		$this->assertSame( 'booking_attachment_transport_invalid', $result->get_error_code() );
@@ -257,6 +301,7 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 			)
 		);
 		$internal = extrachill_api_booking_public_error( new WP_Error( 'booking_read_failed', 'Database details.' ) );
+		$unknown_safe_status = extrachill_api_booking_public_error( new WP_Error( 'new_domain_conflict', 'Private conflict details.', array( 'status' => 409, 'field' => '/private/root' ) ) );
 
 		$this->assertSame( 409, $conflict->get_error_data()['status'] );
 		$this->assertSame( 'booking_idempotency_conflict', $conflict->get_error_code() );
@@ -268,6 +313,10 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 		$this->assertSame( 503, $internal->get_error_data()['status'] );
 		$this->assertSame( 'booking_inquiry_unavailable', $internal->get_error_code() );
 		$this->assertStringNotContainsString( 'Database', $internal->get_error_message() );
+		$this->assertSame( 'booking_inquiry_unavailable', $unknown_safe_status->get_error_code() );
+		$this->assertSame( 503, $unknown_safe_status->get_error_data()['status'] );
+		$this->assertStringNotContainsString( 'Private', $unknown_safe_status->get_error_message() );
+		$this->assertArrayNotHasKey( 'field', $unknown_safe_status->get_error_data() );
 	}
 
 	public function test_attachment_admission_does_not_construct_events_domain_services() {
@@ -279,21 +328,17 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 
 	private function register_booking_ability() {
 		$test = $this;
-		$register_category = static function () {
-			wp_register_ability_category(
+		if ( ! isset( wp_get_ability_categories()['test'] ) ) {
+			WP_Ability_Categories_Registry::get_instance()->register(
 				'test',
 				array(
 					'label'       => 'Test',
 					'description' => 'Test-only ability contracts.',
 				)
 			);
-		};
-		add_action( 'wp_abilities_api_categories_init', $register_category );
-		do_action( 'wp_abilities_api_categories_init' );
-		remove_action( 'wp_abilities_api_categories_init', $register_category );
+		}
 
-		$register = static function () use ( $test ) {
-			wp_register_ability(
+		WP_Abilities_Registry::get_instance()->register(
 				EXTRACHILL_API_BOOKING_ABILITY,
 				array(
 					'label'               => 'Test booking inquiry',
@@ -336,10 +381,6 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 					),
 				)
 			);
-		};
-		add_action( 'wp_abilities_api_init', $register );
-		do_action( 'wp_abilities_api_init' );
-		remove_action( 'wp_abilities_api_init', $register );
 	}
 
 	private function valid_request() {
@@ -366,4 +407,16 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 			'size'     => filesize( $file ),
 		);
 	}
+
+	/** Return the test-owned deterministic atomic counter. */
+	public function use_test_rate_limit_store() {
+		return array( $this, 'increment_test_rate_limit' );
+	}
+
+	/** Increment one test counter exactly once per call. */
+	public function increment_test_rate_limit( $key ) {
+		$this->rate_counts[ $key ] = ( $this->rate_counts[ $key ] ?? 0 ) + 1;
+		return $this->rate_counts[ $key ];
+	}
+
 }

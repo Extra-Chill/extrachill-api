@@ -65,6 +65,29 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		unset( $_SERVER['HTTP_COOKIE'], $_SERVER['HTTP_X_WP_NONCE'], $_SERVER['HTTP_X_EC_INTERNAL_USER'], $_SERVER['HTTP_X_EC_INTERNAL_TIMESTAMP'], $_SERVER['HTTP_X_EC_INTERNAL_SIGNATURE'] );
 
 		add_filter( 'pre_http_request', array( $this, 'intercept_loopback' ), 10, 3 );
+		if ( ! wp_has_ability_category( 'extrachill-api-tests' ) ) {
+			WP_Ability_Categories_Registry::get_instance()->register(
+				'extrachill-api-tests',
+				array(
+					'label'       => 'Extra Chill API Tests',
+					'description' => 'Controlled affinity contracts.',
+				)
+			);
+		}
+		WP_Abilities_Registry::get_instance()->register(
+			'extrachill/record-booking-attachment-delivery',
+			array(
+				'label'               => 'Record test delivery',
+				'description'         => 'Controlled affinity delivery callback.',
+				'category'            => 'extrachill-api-tests',
+				'input_schema'        => array( 'type' => 'object' ),
+				'output_schema'       => array( 'type' => 'object' ),
+				'permission_callback' => '__return_true',
+				'execute_callback'    => static function () {
+					return array( 'recorded' => true );
+				},
+			)
+		);
 	}
 
 	/**
@@ -72,6 +95,7 @@ class Route_AffinityTest extends WP_UnitTestCase {
 	 */
 	public function tear_down() {
 		remove_filter( 'pre_http_request', array( $this, 'intercept_loopback' ), 10 );
+		wp_unregister_ability( 'extrachill/record-booking-attachment-delivery' );
 
 		foreach ( $this->original_server as $key => $value ) {
 			if ( null === $value ) {
@@ -114,6 +138,7 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		$request->set_header( 'X-EC-Affinity-Signature', str_repeat( 'a', 64 ) );
 		$request->set_header( 'X-EC-Affinity-Target', 'artist.example.com' );
 		$request->set_header( 'X-EC-Affinity-Nonce', wp_generate_uuid4() );
+		$request->set_header( 'X-EC-Affinity-Verified', '1' );
 
 		$this->assertInstanceOf( WP_REST_Response::class, $this->dispatch_affinity( $request ) );
 		$this->assertSame( 1, $this->request_count );
@@ -195,13 +220,14 @@ class Route_AffinityTest extends WP_UnitTestCase {
 				'Content-Type'              => 'text/plain',
 				'Content-Disposition'       => 'attachment; filename="rider.txt"',
 				'Content-Range'             => 'bytes 2-5/10',
-				'X-EC-Download-Correlation' => wp_generate_uuid4(),
 			)
 		);
 		$response = $this->dispatch_affinity( $request );
 
 		$this->assertSame( 206, $response->get_status() );
 		$this->assertNull( $response->get_data() );
+		$this->assertArrayNotHasKey( 'X-EC-Download-Correlation', $response->get_headers() );
+		$this->assertArrayNotHasKey( 'X-EC-Affinity-Delivery', $response->get_headers() );
 		$this->assertSame( 'bytes=2-5', $this->last_http_args['headers']['range'] );
 		$this->assertTrue( $this->last_http_args['stream'] );
 		$this->assertSame( extrachill_api_booking_attachment_max_bytes() + 1, $this->last_http_args['limit_response_size'] );
@@ -281,6 +307,8 @@ class Route_AffinityTest extends WP_UnitTestCase {
 
 		$reentry = $this->reentry_request( $source );
 		$this->assertNull( $this->dispatch_affinity( $reentry ) );
+		$this->assertSame( '203.0.113.10', extrachill_api_route_affinity_context( $reentry )['remote_addr'] );
+		$this->assertSame( '', (string) $reentry->get_header( 'X-EC-Affinity-Verified' ) );
 		$this->assert_reentry_rejected( $reentry );
 		$this->assertSame( 1, $this->request_count );
 	}
@@ -329,6 +357,74 @@ class Route_AffinityTest extends WP_UnitTestCase {
 
 		$this->assertTrue( ec_cross_site_authenticate_internal_request( null ) );
 		$this->assertSame( $user_id, get_current_user_id() );
+	}
+
+	/** Caller-supplied affinity identity is removed and replaced from the socket. */
+	public function test_affinity_client_spoof_is_overwritten_before_signing() {
+		$request = $this->json_request(
+			'POST',
+			'/extrachill/v1/artists',
+			array(
+				'name'                     => 'Signed',
+				'_ec_affinity_client'      => str_repeat( 'a', 64 ),
+				'_ec_affinity_remote_addr' => '192.0.2.200',
+			)
+		);
+		$request->set_header( 'X-EC-Affinity-Client', str_repeat( 'b', 64 ) );
+		$request->set_header( 'X-EC-Affinity-Remote-Addr', '192.0.2.201' );
+		$request->set_header( 'X-EC-Affinity-Verified', '1' );
+
+		$this->dispatch_affinity( $request );
+		$body = json_decode( $this->last_http_args['body'], true );
+
+		$this->assertArrayNotHasKey( '_ec_affinity_client', $body );
+		$this->assertArrayNotHasKey( '_ec_affinity_remote_addr', $body );
+		$this->assertSame( '203.0.113.10', $this->last_http_args['headers']['x-ec-affinity-remote-addr'] );
+		$this->assertSame( hash_hmac( 'sha256', '203.0.113.10', wp_salt( 'nonce' ) ), $this->last_http_args['headers']['x-ec-affinity-client'] );
+	}
+
+	/** Multipart forwarding uses the same signed canonical user transport as JSON. */
+	public function test_multipart_forwarding_preserves_signed_canonical_user() {
+		$user_id = self::factory()->user->create();
+		wp_set_current_user( $user_id );
+		$file = wp_tempnam( 'booking-affinity-auth' );
+		file_put_contents( $file, 'press notes' );
+		add_filter( 'extrachill_api_allow_test_booking_file', '__return_true' );
+		try {
+			$request = new WP_REST_Request( 'POST', '/extrachill/v1/venues/42/booking-inquiries' );
+			$request->set_body_params(
+				array(
+					'venue'               => 42,
+					'idempotency_key'     => 'multipart-auth',
+					'intake'              => wp_json_encode( array( 'message' => 'Hello' ) ),
+					'attachment_purposes' => wp_json_encode( array( 'press_release' ) ),
+					'turnstile_response'  => 'test',
+				)
+			);
+			$request->set_file_params(
+				array(
+					'attachments' => array(
+						'name'     => 'press.txt',
+						'type'     => 'text/plain',
+						'tmp_name' => $file,
+						'error'    => UPLOAD_ERR_OK,
+						'size'     => filesize( $file ),
+					),
+				)
+			);
+
+			$this->dispatch_affinity( $request );
+			$headers = $this->last_http_args['headers'];
+			$this->assertSame( (string) $user_id, $headers['X-EC-Internal-User'] );
+			$this->assertTrue( ec_cross_site_verify_signature( $user_id, (int) $headers['X-EC-Internal-Timestamp'], $headers['X-EC-Internal-Signature'] ) );
+			$this->assertStringStartsWith( 'multipart/form-data; boundary=', $headers['Content-Type'] );
+			$this->assertStringContainsString( 'press notes', $this->last_http_args['body'] );
+		} finally {
+			remove_filter( 'extrachill_api_allow_test_booking_file', '__return_true' );
+			if ( file_exists( $file ) ) {
+				unlink( $file );
+			}
+		}
 	}
 
 	/**
@@ -470,6 +566,19 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		$this->last_http_args = $args;
 		$this->last_http_url  = $url;
 		if ( ! empty( $args['stream'] ) && is_array( $this->downstream_response ) ) {
+			$nonce = (string) ( $args['headers']['X-EC-Affinity-Nonce'] ?? '' );
+			$status = (int) ( $this->downstream_response['response']['code'] ?? 0 );
+			if ( in_array( $status, array( 200, 206 ), true ) ) {
+				$delivery_headers = extrachill_api_booking_attachment_affinity_delivery_headers(
+					array(
+						'booking_id'     => 12,
+						'attachment_id'  => 34,
+						'correlation_id' => '11111111-1111-4111-8111-111111111111',
+					),
+					array( 'nonce' => $nonce )
+				);
+				$this->downstream_response['headers'] = array_merge( $this->downstream_response['headers'], $delivery_headers );
+			}
 			file_put_contents( $args['filename'], $this->downstream_response['body'] );
 			$this->downstream_response['body']     = '';
 			$this->downstream_response['filename'] = $args['filename'];
@@ -558,7 +667,7 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		}
 
 		foreach ( $this->last_http_args['headers'] as $name => $value ) {
-			if ( 0 === strpos( $name, 'X-EC-Affinity-' ) ) {
+			if ( 0 === strpos( strtolower( $name ), 'x-ec-affinity-' ) ) {
 				$request->set_header( $name, $value );
 			}
 		}

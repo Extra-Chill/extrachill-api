@@ -171,7 +171,8 @@ function extrachill_api_booking_inquiry_permission( WP_REST_Request $request ) {
 		return new WP_Error( 'booking_security_unavailable', __( 'Security verification is unavailable.', 'extrachill-api' ), array( 'status' => 503 ) );
 	}
 	$original_remote_addr = $_SERVER['REMOTE_ADDR'] ?? null;
-	$affinity_remote_addr = '1' === $request->get_header( 'X-EC-Affinity-Verified' ) ? (string) $request->get_param( '_ec_affinity_remote_addr' ) : '';
+	$affinity_context     = function_exists( 'extrachill_api_route_affinity_context' ) ? extrachill_api_route_affinity_context( $request ) : array();
+	$affinity_remote_addr = (string) ( $affinity_context['remote_addr'] ?? '' );
 	if ( '' !== $affinity_remote_addr && false !== filter_var( $affinity_remote_addr, FILTER_VALIDATE_IP ) ) {
 		$_SERVER['REMOTE_ADDR'] = $affinity_remote_addr;
 	}
@@ -332,7 +333,8 @@ function extrachill_api_normalize_booking_files( WP_REST_Request $request ) {
 		$file['purpose'] = sanitize_key( $purposes[ $index ] );
 	}
 	unset( $file );
-	if ( '1' === $request->get_header( 'X-EC-Affinity-Verified' ) ) {
+	$affinity_context = function_exists( 'extrachill_api_route_affinity_context' ) ? extrachill_api_route_affinity_context( $request ) : array();
+	if ( $affinity_context ) {
 		$expected = json_decode( (string) $request->get_param( EXTRACHILL_API_BOOKING_FILES ), true );
 		if ( ! is_array( $expected ) || extrachill_api_booking_file_descriptors( $files ) !== $expected ) {
 			return new WP_Error( 'booking_attachment_transport_invalid', __( 'The booking attachment transport could not be verified.', 'extrachill-api' ), array( 'status' => 400 ) );
@@ -341,49 +343,46 @@ function extrachill_api_normalize_booking_files( WP_REST_Request $request ) {
 
 	return $files;
 }
-/** Keep domain details private while preserving stable HTTP classes. */
+/** Map only explicitly contracted domain errors to fixed public responses. */
 function extrachill_api_booking_public_error( WP_Error $error ) {
-	$code   = $error->get_error_code();
-	$data   = (array) $error->get_error_data();
-	$status = (int) ( $data['status'] ?? 0 );
-	if ( $status < 400 || $status > 599 ) {
-		$status = 0 === strpos( $code, 'invalid_' ) || false !== strpos( $code, '_required' ) ? 400 : 503;
+	$contracts = array(
+		'booking_idempotency_conflict'              => array( 'booking_idempotency_conflict', 409, __( 'This inquiry key was already used for different details.', 'extrachill-api' ), array() ),
+		'booking_config_revision_conflict'          => array( 'booking_inquiry_stale_config', 409, __( 'The venue booking configuration changed. Refresh it before resubmitting.', 'extrachill-api' ), array() ),
+		'venue_booking_config_version_conflict'     => array( 'booking_inquiry_stale_config', 409, __( 'The venue booking configuration changed. Refresh it before resubmitting.', 'extrachill-api' ), array() ),
+		'booking_inquiry_admission_disabled'        => array( 'booking_inquiry_unavailable', 503, __( 'This venue is not accepting booking inquiries.', 'extrachill-api' ), array() ),
+		'booking_inquiry_unavailable'               => array( 'booking_inquiry_unavailable', 503, __( 'Booking inquiry processing is temporarily unavailable.', 'extrachill-api' ), array() ),
+		'booking_inquiry_reconciliation_required'   => array( 'booking_inquiry_reconciliation_required', 503, __( 'The inquiry outcome requires reconciliation before retrying.', 'extrachill-api' ), array( 'retryable', 'reconciliation_required' ) ),
+		'invalid_booking_attachment_count'          => array( 'booking_attachment_rejected', 400, __( 'Too many booking attachments were submitted.', 'extrachill-api' ), array() ),
+		'booking_attachment_upload_failed'          => array( 'booking_attachment_rejected', 400, __( 'A booking attachment could not be received.', 'extrachill-api' ), array() ),
+		'invalid_booking_attachment_filename'       => array( 'booking_attachment_rejected', 400, __( 'A booking attachment filename is not allowed.', 'extrachill-api' ), array() ),
+		'invalid_booking_attachment_purpose'        => array( 'booking_attachment_rejected', 400, __( 'A booking attachment purpose is not supported.', 'extrachill-api' ), array() ),
+		'invalid_booking_attachment_type'           => array( 'booking_attachment_rejected', 400, __( 'A booking attachment type is not supported.', 'extrachill-api' ), array() ),
+		'invalid_booking_attachment_size'           => array( 'booking_attachment_rejected', 413, __( 'A booking attachment is outside the allowed size.', 'extrachill-api' ), array() ),
+		'invalid_booking_attachment_aggregate_size' => array( 'booking_attachment_rejected', 413, __( 'The combined booking attachments are too large.', 'extrachill-api' ), array() ),
+		'booking_tax_document_denied'               => array( 'booking_attachment_rejected', 400, __( 'Tax identity documents are not accepted here.', 'extrachill-api' ), array() ),
+		'turnstile_missing_token'                   => array( 'turnstile_missing_token', 403, __( 'Security verification is required.', 'extrachill-api' ), array() ),
+		'turnstile_failed'                          => array( 'turnstile_failed', 403, __( 'Security verification failed. Refresh the challenge and retry.', 'extrachill-api' ), array() ),
+	);
+	$contract  = $contracts[ $error->get_error_code() ] ?? null;
+	if ( ! is_array( $contract ) ) {
+		return new WP_Error( 'booking_inquiry_unavailable', __( 'Booking inquiry processing is temporarily unavailable.', 'extrachill-api' ), array( 'status' => 503 ) );
 	}
-	$safe = in_array( $status, array( 400, 403, 409, 413, 429 ), true ) || 'booking_inquiry_reconciliation_required' === $code;
-	if ( ! $safe ) {
-		$status = 503;
-	}
-	$public_code = $code;
-	if ( 409 === $status && false !== strpos( $code, 'config' ) ) {
-		$public_code = 'booking_inquiry_stale_config';
-	} elseif ( in_array( $status, array( 400, 413 ), true ) && false !== strpos( $code, 'attachment' ) ) {
-		$public_code = 'booking_attachment_rejected';
-	}
-	$public_data = array( 'status' => $status );
-	foreach ( array( 'retryable', 'reconciliation_required', 'retry_after', 'headers' ) as $key ) {
-		if ( array_key_exists( $key, $data ) ) {
-			$public_data[ $key ] = $data[ $key ];
+
+	$data        = (array) $error->get_error_data();
+	$public_data = array( 'status' => $contract[1] );
+	foreach ( $contract[3] as $field ) {
+		if ( isset( $data[ $field ] ) && is_bool( $data[ $field ] ) ) {
+			$public_data[ $field ] = $data[ $field ];
 		}
 	}
 
-	return new WP_Error(
-		$safe ? $public_code : 'booking_inquiry_unavailable',
-		$safe ? $error->get_error_message() : __( 'Booking inquiry processing is temporarily unavailable.', 'extrachill-api' ),
-		$public_data
-	);
+	return new WP_Error( $contract[0], $contract[2], $public_data );
 }
 
 /** Add file descriptors to the affinity signature without exposing bytes. */
 function extrachill_api_booking_affinity_signature_body( $body, WP_REST_Request $request ) {
 	if ( ! preg_match( '#^/extrachill/v1/venues/\d+/booking-inquiries$#', $request->get_route() ) ) {
 		return $body;
-	}
-	if ( empty( $body['_ec_affinity_client'] ) ) {
-		$client_ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
-		if ( '' !== $client_ip && false !== filter_var( $client_ip, FILTER_VALIDATE_IP ) ) {
-			$body['_ec_affinity_client']      = hash_hmac( 'sha256', $client_ip, wp_salt( 'nonce' ) );
-			$body['_ec_affinity_remote_addr'] = $client_ip;
-		}
 	}
 	$encoded = $request->get_param( EXTRACHILL_API_BOOKING_FILES );
 	if ( is_string( $encoded ) ) {
@@ -439,8 +438,10 @@ function extrachill_api_booking_affinity_file_forward( $response, $target_site, 
 	if ( is_wp_error( $body ) ) {
 		return $body;
 	}
-	$headers = array_merge(
+	$auth_headers = function_exists( 'ec_cross_site_build_auth_headers' ) ? ec_cross_site_build_auth_headers( get_current_user_id() ) : array();
+	$headers      = array_merge(
 		(array) ( $args['headers'] ?? array() ),
+		$auth_headers,
 		array(
 			'Host'         => $host,
 			'Accept'       => 'application/json',

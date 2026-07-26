@@ -4,7 +4,13 @@
   "extensions": {
     "wordpress": {
       "settings": {
-        "validation_dependencies": ["data-machine", "extrachill-network"],
+        "validation_dependencies": [
+          {
+            "path": "../extrachill-network",
+            "plugin_slug": "extrachill-network",
+            "activate": true
+          }
+        ],
         "wordpress_runtime_php_version": "8.4"
       }
     }

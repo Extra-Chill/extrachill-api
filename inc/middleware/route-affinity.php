@@ -105,19 +105,56 @@ function extrachill_api_route_affinity_payload( $method, $route, $target_host, $
 	);
 }
 
-/** Return the only caller header permitted across route-affinity transport. */
-function extrachill_api_route_affinity_forwarded_headers( WP_REST_Request $request ) {
+/**
+ * Return the headers bound to route-affinity transport.
+ *
+ * Client identity is derived only while creating the hop. Verification reads
+ * the transmitted values so a direct caller can never ask API to sign a
+ * caller-supplied affinity identity.
+ *
+ * @param WP_REST_Request $request    Request being forwarded or verified.
+ * @param bool            $forwarding Whether this is the source-side hop.
+ * @return array
+ */
+function extrachill_api_route_affinity_forwarded_headers( WP_REST_Request $request, $forwarding = false ) {
 	$headers = array();
-	if ( ! function_exists( 'extrachill_api_is_booking_attachment_download_route' ) || ! extrachill_api_is_booking_attachment_download_route( $request->get_route() ) ) {
-		return $headers;
+	if ( function_exists( 'extrachill_api_is_booking_attachment_download_route' ) && extrachill_api_is_booking_attachment_download_route( $request->get_route() ) ) {
+		$range = trim( (string) $request->get_header( 'Range' ) );
+		if ( '' !== $range ) {
+			$headers['range'] = $range;
+		}
 	}
 
-	$range = trim( (string) $request->get_header( 'Range' ) );
-	if ( '' !== $range ) {
-		$headers['range'] = $range;
+	if ( $forwarding ) {
+		$client_ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
+		if ( '' !== $client_ip && false !== filter_var( $client_ip, FILTER_VALIDATE_IP ) ) {
+			$headers['x-ec-affinity-client']      = hash_hmac( 'sha256', $client_ip, wp_salt( 'nonce' ) );
+			$headers['x-ec-affinity-remote-addr'] = $client_ip;
+		}
+	} else {
+		$client = strtolower( trim( (string) $request->get_header( 'X-EC-Affinity-Client' ) ) );
+		$remote = trim( (string) $request->get_header( 'X-EC-Affinity-Remote-Addr' ) );
+		if ( 1 === preg_match( '/^[a-f0-9]{64}$/', $client ) && false !== filter_var( $remote, FILTER_VALIDATE_IP ) ) {
+			$headers['x-ec-affinity-client']      = $client;
+			$headers['x-ec-affinity-remote-addr'] = $remote;
+		}
 	}
 
 	return $headers;
+}
+
+/** Store cryptographically verified context without mutating public input. */
+function extrachill_api_set_route_affinity_context( WP_REST_Request $request, array $context ) {
+	if ( ! isset( $GLOBALS['extrachill_api_route_affinity_contexts'] ) || ! $GLOBALS['extrachill_api_route_affinity_contexts'] instanceof WeakMap ) {
+		$GLOBALS['extrachill_api_route_affinity_contexts'] = new WeakMap();
+	}
+	$GLOBALS['extrachill_api_route_affinity_contexts'][ $request ] = $context;
+}
+
+/** Return context created only by successful affinity HMAC verification. */
+function extrachill_api_route_affinity_context( WP_REST_Request $request ) {
+	$contexts = $GLOBALS['extrachill_api_route_affinity_contexts'] ?? null;
+	return $contexts instanceof WeakMap && isset( $contexts[ $request ] ) ? $contexts[ $request ] : array();
 }
 
 /**
@@ -136,6 +173,9 @@ function extrachill_api_route_affinity_request_body( WP_REST_Request $request ) 
 		$body = $request->get_body_params();
 	}
 	$body = ! empty( $body ) ? $body : array();
+	if ( is_array( $body ) ) {
+		unset( $body['_ec_affinity_client'], $body['_ec_affinity_remote_addr'] );
+	}
 
 	/**
 	 * Filters the signed body representation for transport-only request data.
@@ -193,7 +233,8 @@ function extrachill_api_is_route_affinity_reentry( WP_REST_Request $request ) {
 		return false;
 	}
 
-	$payload  = extrachill_api_route_affinity_payload(
+	$forwarded_headers = extrachill_api_route_affinity_forwarded_headers( $request );
+	$payload           = extrachill_api_route_affinity_payload(
 		$request->get_method(),
 		$request->get_route(),
 		$target,
@@ -201,9 +242,9 @@ function extrachill_api_is_route_affinity_reentry( WP_REST_Request $request ) {
 		extrachill_api_route_affinity_request_body( $request ),
 		$timestamp,
 		$nonce,
-		extrachill_api_route_affinity_forwarded_headers( $request )
+		$forwarded_headers
 	);
-	$expected = hash_hmac( 'sha256', $payload, wp_salt( 'auth' ) );
+	$expected          = hash_hmac( 'sha256', $payload, wp_salt( 'auth' ) );
 	if ( ! hash_equals( $expected, $signature ) ) {
 		return false;
 	}
@@ -213,7 +254,14 @@ function extrachill_api_is_route_affinity_reentry( WP_REST_Request $request ) {
 	// residual replay boundary.
 	$verified = wp_cache_add( 'route_affinity_' . hash( 'sha256', $nonce ), 1, 'extrachill_api', 300 );
 	if ( $verified ) {
-		$request->set_header( 'X-EC-Affinity-Verified', '1' );
+		extrachill_api_set_route_affinity_context(
+			$request,
+			array(
+				'client'      => (string) ( $forwarded_headers['x-ec-affinity-client'] ?? '' ),
+				'remote_addr' => (string) ( $forwarded_headers['x-ec-affinity-remote-addr'] ?? '' ),
+				'nonce'       => $nonce,
+			)
+		);
 	}
 
 	return $verified;
@@ -299,7 +347,7 @@ function extrachill_api_route_affinity_dispatch( $result, WP_REST_Server $server
 		return new WP_Error( 'route_affinity_target_invalid', 'Could not resolve route-affinity target host.', array( 'status' => 500 ) );
 	}
 
-	$forwarded_headers = extrachill_api_route_affinity_forwarded_headers( $request );
+	$forwarded_headers = extrachill_api_route_affinity_forwarded_headers( $request, true );
 	$timestamp         = time();
 	$nonce             = wp_generate_uuid4();
 	$payload           = extrachill_api_route_affinity_payload( $method, $route, $target_host, $query_params, $body, $timestamp, $nonce, $forwarded_headers );
@@ -401,7 +449,7 @@ function extrachill_api_route_affinity_dispatch( $result, WP_REST_Server $server
 
 	if ( is_array( $forwarded_http_response ) ) {
 		if ( $private_stream ) {
-			return extrachill_api_private_stream_from_affinity_response( $forwarded_http_response, $private_spool );
+			return extrachill_api_private_stream_from_affinity_response( $forwarded_http_response, $private_spool, $nonce );
 		}
 		$status  = wp_remote_retrieve_response_code( $forwarded_http_response );
 		$headers = wp_remote_retrieve_headers( $forwarded_http_response );

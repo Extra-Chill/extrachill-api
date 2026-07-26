@@ -42,13 +42,19 @@ namespace {
 		/** @var array<int, array<string, int|string>> */
 		private $delivery_outcomes = array();
 
+		/** @var array<string, int> */
+		private $rate_counts = array();
+
 		/** Register a controlled hidden Events ability. */
 		public function set_up() {
 			parent::set_up();
 			\ExtraChillEvents\Core\BookingAttachmentService::$consumed = array();
 			$GLOBALS['extrachill_api_private_streams']                    = array();
 			$this->delivery_outcomes                                     = array();
+			$this->rate_counts                                           = array();
 			wp_set_current_user( 0 );
+			remove_filter( 'rest_pre_dispatch', 'extrachill_api_route_affinity_dispatch', 10 );
+			add_filter( 'extrachill_api_rate_limit_store', array( $this, 'use_test_rate_limit_store' ) );
 
 			$categories = WP_Ability_Categories_Registry::get_instance();
 			if ( ! wp_has_ability_category( 'extrachill-api-tests' ) ) {
@@ -68,10 +74,12 @@ namespace {
 		/** Remove controlled state and any unserved streams. */
 		public function tear_down() {
 			extrachill_api_cleanup_private_streams();
+			remove_filter( 'extrachill_api_rate_limit_store', array( $this, 'use_test_rate_limit_store' ) );
 			foreach ( $this->registered_abilities as $name ) {
 				wp_unregister_ability( $name );
 			}
 			wp_set_current_user( 0 );
+			add_filter( 'rest_pre_dispatch', 'extrachill_api_route_affinity_dispatch', 10, 3 );
 			parent::tear_down();
 		}
 
@@ -127,9 +135,10 @@ namespace {
 			$this->assertStringContainsString( 'no-store', $headers['Cache-Control'] );
 			$this->assertSame( 'application/pdf', $headers['Content-Type'] );
 			$this->assertStringContainsString( 'safe-rider.pdf', $headers['Content-Disposition'] );
-			$this->assertMatchesRegularExpression( '/^[a-f0-9-]{36}$/i', $headers['X-EC-Download-Correlation'] );
+			$this->assertArrayNotHasKey( 'X-EC-Download-Correlation', $headers );
+			$this->assertArrayNotHasKey( 'X-EC-Affinity-Delivery', $headers );
 			$this->assertSame( array( array( 'booking_id' => 1, 'attachment_id' => 9, 'actor_id' => $user_id ) ), $this->audit );
-			$correlation_id = $headers['X-EC-Download-Correlation'];
+			$correlation_id = '11111111-1111-4111-8111-000000000001';
 			$this->assertSame( 'private booking bytes', $this->serve( $response ) );
 			$this->assertSame(
 				array(
@@ -199,6 +208,7 @@ namespace {
 				'booking_id'     => 10,
 				'attachment_id'  => 2,
 				'correlation_id' => '11111111-1111-4111-8111-111111111110',
+				'success_outcome' => 'partial',
 			);
 			$stream = fopen( 'php://temp', 'w+b' );
 			fwrite( $stream, 'abc' );
@@ -235,33 +245,47 @@ namespace {
 			remove_filter( 'extrachill_api_booking_attachment_download_rate_limit', array( $this, 'one_byte_limit' ) );
 
 			$this->assertSame( 429, $second->get_status() );
-			$this->assertSame( '60', $this->response_header( $second, 'retry-after' ) );
+			$this->assertGreaterThanOrEqual( 1, (int) $this->response_header( $second, 'retry-after' ) );
+			$this->assertLessThanOrEqual( 60, (int) $this->response_header( $second, 'retry-after' ) );
 			$this->assertCount( 1, $this->audit );
 		}
 
 		/** Affinity spools preserve private bytes without trusting unsafe headers. */
 		public function test_affinity_spool_is_bounded_sanitized_and_cleaned() {
+			$nonce = wp_generate_uuid4();
 			$path = wp_tempnam( 'booking-affinity-test' );
 			file_put_contents( $path, 'part' );
 			chmod( $path, 0600 );
+			$delivery = array(
+				'booking_id'     => 10,
+				'attachment_id'  => 2,
+				'correlation_id' => '11111111-1111-4111-8111-111111111110',
+				'success_outcome' => 'partial',
+			);
 			$response = extrachill_api_private_stream_from_affinity_response(
 				array(
-					'headers'  => array(
+					'headers'  => array_merge(
+						array(
 						'Content-Length'      => '4',
 						'Content-Type'        => 'text/plain',
 						'Content-Disposition' => 'attachment; filename="../rider.txt"',
 						'Content-Range'       => 'bytes 2-5/10',
-						'X-EC-Download-Correlation' => '11111111-1111-4111-8111-111111111111',
+						),
+						extrachill_api_booking_attachment_affinity_delivery_headers( $delivery, array( 'nonce' => $nonce ) )
 					),
 					'body'     => '',
 					'response' => array( 'code' => 206 ),
 				),
-				$path
+				$path,
+				$nonce
 			);
 
 			$this->assertSame( 206, $response->get_status() );
 			$this->assertStringNotContainsString( '..', $response->get_headers()['Content-Disposition'] );
+			$this->assertArrayNotHasKey( 'X-EC-Affinity-Delivery', $response->get_headers() );
 			$this->assertSame( 'part', $this->serve( $response ) );
+			$this->assertSame( 'partial', $this->delivery_outcomes[0]['outcome'] );
+			$this->assertSame( 4, $this->delivery_outcomes[0]['bytes_sent'] );
 			$this->assertFileDoesNotExist( $path );
 
 			$bad_path = wp_tempnam( 'booking-affinity-test' );
@@ -275,10 +299,46 @@ namespace {
 					'body'     => '',
 					'response' => array( 'code' => 206 ),
 				),
-				$bad_path
+				$bad_path,
+				$nonce
 			);
 			$this->assertWPError( $bad );
 			$this->assertFileDoesNotExist( $bad_path );
+		}
+
+		/** Affinity target spooling is non-terminal; only outer client serving completes delivery. */
+		public function test_affinity_target_does_not_complete_delivery_before_outer_stream() {
+			wp_set_current_user( self::factory()->user->create() );
+			$nonce   = wp_generate_uuid4();
+			$request = new WP_REST_Request( 'GET', '/extrachill/v1/events/bookings/1/attachments/9/download' );
+			$request->set_param( 'booking_id', 1 );
+			$request->set_param( 'attachment_id', 9 );
+			extrachill_api_set_route_affinity_context( $request, array( 'nonce' => $nonce ) );
+
+			$target = extrachill_api_download_booking_attachment( $request );
+			$this->assertInstanceOf( WP_REST_Response::class, $target );
+			$this->assertArrayHasKey( 'X-EC-Affinity-Delivery', $target->get_headers() );
+			$bytes = $this->serve( $target );
+			$this->assertSame( 'private booking bytes', $bytes );
+			$this->assertSame( array(), $this->delivery_outcomes, 'Loopback spool completion must not be terminal.' );
+
+			$path = wp_tempnam( 'booking-affinity-outer' );
+			file_put_contents( $path, $bytes );
+			chmod( $path, 0600 );
+			$outer = extrachill_api_private_stream_from_affinity_response(
+				array(
+					'headers'  => $target->get_headers(),
+					'body'     => '',
+					'response' => array( 'code' => 200 ),
+				),
+				$path,
+				$nonce
+			);
+			$this->assertArrayNotHasKey( 'X-EC-Affinity-Delivery', $outer->get_headers() );
+			$this->assertSame( $bytes, $this->serve( $outer ) );
+			$this->assertCount( 1, $this->delivery_outcomes );
+			$this->assertSame( 'completed', $this->delivery_outcomes[0]['outcome'] );
+			$this->assertSame( strlen( $bytes ), $this->delivery_outcomes[0]['bytes_sent'] );
 		}
 
 		/** HEAD and REST envelope requests cannot consume a private handoff. */
@@ -296,6 +356,17 @@ namespace {
 		/** Return a one-byte transport limit. */
 		public function one_byte_limit() {
 			return 1;
+		}
+
+		/** Return the deterministic test atomic store. */
+		public function use_test_rate_limit_store() {
+			return array( $this, 'increment_test_rate_limit' );
+		}
+
+		/** Increment one test rate counter. */
+		public function increment_test_rate_limit( $key ) {
+			$this->rate_counts[ $key ] = ( $this->rate_counts[ $key ] ?? 0 ) + 1;
+			return $this->rate_counts[ $key ];
 		}
 
 		/** Register the hidden Events descriptor contract. */
