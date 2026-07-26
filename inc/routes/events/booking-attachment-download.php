@@ -795,15 +795,31 @@ function extrachill_api_private_stream_from_affinity_response( array $http_respo
 /** Finalize a consumed handoff without exposing callback or spool failures. */
 function extrachill_api_fail_private_affinity_stream( $path, $delivery, $status = 502 ) {
 	if ( is_array( $delivery ) ) {
-		try {
-			extrachill_api_record_booking_attachment_delivery( $delivery, 'failed', 0 );
-		} catch ( Throwable $throwable ) {
-			unset( $throwable );
+		$bytes = extrachill_api_private_affinity_spool_bytes( $path );
+		if ( ! is_wp_error( $bytes ) ) {
+			try {
+				extrachill_api_record_booking_attachment_delivery( $delivery, $bytes > 0 ? 'partial' : 'failed', $bytes );
+			} catch ( Throwable $throwable ) {
+				unset( $throwable );
+			}
 		}
 	}
 	extrachill_api_discard_private_affinity_spool( $path );
 
 	return extrachill_api_booking_attachment_download_error( $status );
+}
+
+/** Return exact bounded spool bytes, rejecting counts that cannot be trusted. */
+function extrachill_api_private_affinity_spool_bytes( $path ) {
+	if ( ! is_string( $path ) || '' === $path || ! is_file( $path ) ) {
+		return 0;
+	}
+	$size = filesize( $path );
+	if ( false === $size || $size < 0 || $size > extrachill_api_booking_attachment_max_bytes() ) {
+		return new WP_Error( 'booking_attachment_spool_size_invalid' );
+	}
+
+	return (int) $size;
 }
 
 /** Extract and sanitize only a presentation filename from Content-Disposition. */

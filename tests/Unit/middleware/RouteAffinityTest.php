@@ -41,6 +41,9 @@ class Route_AffinityTest extends WP_UnitTestCase {
 	/** @var array<int, array<string, mixed>> */
 	private $delivery_outcomes = array();
 
+	/** @var string */
+	private $loopback_error_bytes = '';
+
 	/**
 	 * Original server values changed by tests.
 	 *
@@ -65,6 +68,7 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		$_SERVER['REMOTE_ADDR']    = '203.0.113.10';
 		$this->downstream_response = $this->http_response( 200, array( 'ok' => true ) );
 		$this->delivery_outcomes   = array();
+		$this->loopback_error_bytes = '';
 		wp_set_current_user( 0 );
 		unset( $_SERVER['HTTP_COOKIE'], $_SERVER['HTTP_X_WP_NONCE'], $_SERVER['HTTP_X_EC_INTERNAL_USER'], $_SERVER['HTTP_X_EC_INTERNAL_TIMESTAMP'], $_SERVER['HTTP_X_EC_INTERNAL_SIGNATURE'] );
 
@@ -102,6 +106,8 @@ class Route_AffinityTest extends WP_UnitTestCase {
 	public function tear_down() {
 		remove_filter( 'pre_http_request', array( $this, 'intercept_loopback' ), 10 );
 		wp_unregister_ability( 'extrachill/record-booking-attachment-delivery' );
+		remove_all_filters( 'extrachill_api_private_affinity_spool_path' );
+		remove_all_filters( 'extrachill_api_private_affinity_spool_protected' );
 
 		foreach ( $this->original_server as $key => $value ) {
 			if ( null === $value ) {
@@ -281,6 +287,62 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		$this->assertSame( 'failed', $this->delivery_outcomes[0]['outcome'] );
 		$this->assertSame( 0, $this->delivery_outcomes[0]['bytes_sent'] );
 		$this->assertFileDoesNotExist( $spool );
+	}
+
+	/** A nonempty failed loopback records the exact bounded partial byte count. */
+	public function test_private_stream_wp_error_records_partial_spool_bytes() {
+		wp_set_current_user( self::factory()->user->create() );
+		$this->loopback_error_bytes = 'part';
+		$this->downstream_response  = new WP_Error( 'http_request_failed', 'Stream reset after partial body.', array( 'status' => 502 ) );
+		$response = $this->dispatch_affinity( new WP_REST_Request( 'GET', '/extrachill/v1/events/bookings/12/attachments/34/download' ) );
+
+		$this->assertWPError( $response );
+		$this->assertCount( 1, $this->delivery_outcomes );
+		$this->assertSame( 'partial', $this->delivery_outcomes[0]['outcome'] );
+		$this->assertSame( 4, $this->delivery_outcomes[0]['bytes_sent'] );
+		$this->assertFileDoesNotExist( $this->last_http_args['filename'] );
+	}
+
+	/** Exceptions converge on the same finalizer and invoke it exactly once. */
+	public function test_private_stream_exception_finalizes_once() {
+		wp_set_current_user( self::factory()->user->create() );
+		$throw = static function () {
+			throw new RuntimeException( 'post-preflight failure' );
+		};
+		add_filter( 'extrachill_api_route_affinity_file_forward', $throw, PHP_INT_MAX );
+		$response = $this->dispatch_affinity( new WP_REST_Request( 'GET', '/extrachill/v1/events/bookings/12/attachments/34/download' ) );
+		remove_filter( 'extrachill_api_route_affinity_file_forward', $throw, PHP_INT_MAX );
+
+		$this->assertWPError( $response );
+		$this->assertCount( 1, $this->delivery_outcomes );
+		$this->assertSame( 'failed', $this->delivery_outcomes[0]['outcome'] );
+		$this->assertSame( 0, $this->delivery_outcomes[0]['bytes_sent'] );
+	}
+
+	/** Spool setup fails before descriptor issuance, leaving no correlation behind. */
+	public function test_private_stream_spool_setup_failures_do_not_issue_handoff() {
+		wp_set_current_user( self::factory()->user->create() );
+		$path_failure = static function ( $path ) {
+			if ( is_string( $path ) && file_exists( $path ) ) {
+				unlink( $path );
+			}
+			return false;
+		};
+		add_filter( 'extrachill_api_private_affinity_spool_path', $path_failure );
+		$missing = $this->dispatch_affinity( new WP_REST_Request( 'GET', '/extrachill/v1/events/bookings/12/attachments/34/download' ) );
+		remove_filter( 'extrachill_api_private_affinity_spool_path', $path_failure );
+
+		$protect_failure = '__return_false';
+		add_filter( 'extrachill_api_private_affinity_spool_protected', $protect_failure );
+		$unprotected = $this->dispatch_affinity( new WP_REST_Request( 'GET', '/extrachill/v1/events/bookings/12/attachments/34/download' ) );
+		remove_filter( 'extrachill_api_private_affinity_spool_protected', $protect_failure );
+
+		$this->assertWPError( $missing );
+		$this->assertWPError( $unprotected );
+		$this->assertSame( 503, $missing->get_error_data()['status'] );
+		$this->assertSame( 503, $unprotected->get_error_data()['status'] );
+		$this->assertSame( 0, $this->request_count, 'Descriptor preflight must not run until spool setup succeeds.' );
+		$this->assertSame( array(), $this->delivery_outcomes );
 	}
 
 	/**
@@ -653,6 +715,9 @@ class Route_AffinityTest extends WP_UnitTestCase {
 					'mime_type'      => 'text/plain',
 				)
 			);
+		}
+		if ( ! empty( $args['stream'] ) && is_wp_error( $this->downstream_response ) && '' !== $this->loopback_error_bytes ) {
+			file_put_contents( $args['filename'], $this->loopback_error_bytes );
 		}
 		if ( ! empty( $args['stream'] ) && is_array( $this->downstream_response ) ) {
 			$nonce = (string) ( $args['headers']['X-EC-Affinity-Nonce'] ?? '' );

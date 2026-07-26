@@ -379,8 +379,9 @@ namespace {
 				$this->assertWPError( $result, $label );
 				$this->assertSame( 502, $result->get_error_data()['status'], $label );
 				$this->assertCount( $before + 1, $this->delivery_outcomes, $label );
-				$this->assertSame( 'failed', $this->delivery_outcomes[ $before ]['outcome'], $label );
-				$this->assertSame( 0, $this->delivery_outcomes[ $before ]['bytes_sent'], $label );
+				$expected_bytes = 'missing spool' === $label ? 0 : 4;
+				$this->assertSame( $expected_bytes > 0 ? 'partial' : 'failed', $this->delivery_outcomes[ $before ]['outcome'], $label );
+				$this->assertSame( $expected_bytes, $this->delivery_outcomes[ $before ]['bytes_sent'], $label );
 				$this->assertFileDoesNotExist( $path, $label );
 			}
 
@@ -400,9 +401,7 @@ namespace {
 			remove_filter( 'extrachill_api_booking_attachment_max_bytes', array( $this, 'one_byte_limit' ) );
 
 			$this->assertWPError( $result, 'oversized spool' );
-			$this->assertCount( $before + 1, $this->delivery_outcomes );
-			$this->assertSame( 'failed', $this->delivery_outcomes[ $before ]['outcome'] );
-			$this->assertSame( 0, $this->delivery_outcomes[ $before ]['bytes_sent'] );
+			$this->assertCount( $before, $this->delivery_outcomes, 'An impossible spool count must remain reconcilable instead of sending false accounting.' );
 			$this->assertFileDoesNotExist( $oversized );
 		}
 
