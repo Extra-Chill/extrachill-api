@@ -427,6 +427,61 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		}
 	}
 
+	/** JSON booking transport failures use the stable booking error contract. */
+	public function test_json_booking_transport_failure_does_not_leak_network_error() {
+		$this->downstream_response = new WP_Error( 'http_request_failed', 'cURL error 28: private upstream timed out.', array( 'status' => 502 ) );
+		$response = $this->dispatch_affinity( $this->json_request( 'POST', '/extrachill/v1/venues/42/booking-inquiries', array( 'venue' => 42 ) ) );
+
+		$this->assertSame( 503, $response->get_status() );
+		$this->assertSame( 'booking_inquiry_unavailable', $response->get_data()['code'] );
+		$this->assertStringNotContainsString( 'cURL', wp_json_encode( $response->get_data() ) );
+		$this->assertStringNotContainsString( 'http_request_failed', wp_json_encode( $response->get_data() ) );
+	}
+
+	/** Multipart booking transport failures use the same stable contract. */
+	public function test_multipart_booking_transport_failure_does_not_leak_network_error() {
+		$file = wp_tempnam( 'booking-affinity-failure' );
+		file_put_contents( $file, 'press notes' );
+		add_filter( 'extrachill_api_allow_test_booking_file', '__return_true' );
+		try {
+			$request = new WP_REST_Request( 'POST', '/extrachill/v1/venues/42/booking-inquiries' );
+			$request->set_body_params( array( 'venue' => 42, 'attachment_purposes' => array( 'press_release' ) ) );
+			$request->set_file_params(
+				array(
+					'attachments' => array(
+						'name'     => 'press.txt',
+						'type'     => 'text/plain',
+						'tmp_name' => $file,
+						'error'    => UPLOAD_ERR_OK,
+						'size'     => filesize( $file ),
+					),
+				)
+			);
+			$this->downstream_response = new WP_Error( 'http_request_failed', 'cURL error 7: private host refused.', array( 'status' => 502 ) );
+			$response = $this->dispatch_affinity( $request );
+
+			$this->assertSame( 503, $response->get_status() );
+			$this->assertSame( 'booking_inquiry_unavailable', $response->get_data()['code'] );
+			$this->assertStringNotContainsString( 'cURL', wp_json_encode( $response->get_data() ) );
+			$this->assertStringNotContainsString( 'http_request_failed', wp_json_encode( $response->get_data() ) );
+		} finally {
+			remove_filter( 'extrachill_api_allow_test_booking_file', '__return_true' );
+			if ( file_exists( $file ) ) {
+				unlink( $file );
+			}
+		}
+	}
+
+	/** Generic affinity routes retain their existing transport error envelope. */
+	public function test_generic_transport_failure_preserves_original_error() {
+		$this->downstream_response = new WP_Error( 'transport_failed', 'Loopback failed.', array( 'status' => 502 ) );
+		$response = $this->dispatch_affinity( new WP_REST_Request( 'GET', '/extrachill/v1/artists/42' ) );
+
+		$this->assertSame( 502, $response->get_status() );
+		$this->assertSame( 'ec_cross_site_request_failed', $response->get_data()['code'] );
+		$this->assertStringContainsString( 'Loopback failed.', $response->get_data()['message'] );
+	}
+
 	/**
 	 * Successful downstream status and headers are preserved.
 	 *

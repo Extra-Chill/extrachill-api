@@ -472,6 +472,9 @@ function extrachill_api_route_affinity_dispatch( $result, WP_REST_Server $server
 			extrachill_api_discard_private_affinity_spool( $private_spool );
 			return extrachill_api_booking_attachment_download_error( 502 );
 		}
+		if ( preg_match( '#^/extrachill/v1/venues/\d+/booking-inquiries$#', $route ) && function_exists( 'extrachill_api_booking_public_error' ) ) {
+			$response = extrachill_api_booking_public_error( $response );
+		}
 		$status = $response->get_error_data()['status'] ?? 500;
 		return new WP_REST_Response(
 			array(

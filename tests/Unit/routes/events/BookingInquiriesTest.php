@@ -142,6 +142,42 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 		$this->assertLessThanOrEqual( 60, (int) $result->get_error_data()['headers']['Retry-After'] );
 	}
 
+	/** Missing and malformed direct client addresses fail closed. */
+	public function test_rate_limit_rejects_invalid_direct_client_addresses() {
+		foreach ( array( null, 'not-an-ip' ) as $remote_addr ) {
+			if ( null === $remote_addr ) {
+				unset( $_SERVER['REMOTE_ADDR'] );
+			} else {
+				$_SERVER['REMOTE_ADDR'] = $remote_addr;
+			}
+			$result = extrachill_api_check_public_write_rate_limit( $this->valid_request(), 'invalid-direct-' . wp_generate_uuid4(), 1 );
+
+			$this->assertWPError( $result );
+			$this->assertSame( 'public_write_admission_unavailable', $result->get_error_code() );
+			$this->assertSame( 503, $result->get_error_data()['status'] );
+		}
+	}
+
+	/** Incomplete or malformed verified affinity identity also fails closed. */
+	public function test_rate_limit_rejects_invalid_verified_affinity_addresses() {
+		foreach ( array( '', 'not-an-ip' ) as $remote_addr ) {
+			$request = $this->valid_request();
+			extrachill_api_set_route_affinity_context(
+				$request,
+				array(
+					'client'      => str_repeat( 'a', 64 ),
+					'remote_addr' => $remote_addr,
+					'nonce'       => wp_generate_uuid4(),
+				)
+			);
+			$result = extrachill_api_check_public_write_rate_limit( $request, 'invalid-affinity-' . wp_generate_uuid4(), 1 );
+
+			$this->assertWPError( $result );
+			$this->assertSame( 'public_write_admission_unavailable', $result->get_error_code() );
+			$this->assertSame( 503, $result->get_error_data()['status'] );
+		}
+	}
+
 	public function test_booking_error_headers_are_allowlisted_and_removed_from_json() {
 		$error = new WP_Error(
 			'public_write_rate_limited',

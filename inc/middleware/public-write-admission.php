@@ -77,11 +77,16 @@ function extrachill_api_check_public_write_rate_limit( WP_REST_Request $request,
 	}
 
 	$context = function_exists( 'extrachill_api_route_affinity_context' ) ? extrachill_api_route_affinity_context( $request ) : array();
-	$client  = sanitize_text_field( (string) ( $context['client'] ?? '' ) );
-	if ( '' === $client ) {
+	if ( $context ) {
+		$client = strtolower( sanitize_text_field( (string) ( $context['client'] ?? '' ) ) );
+		$ip     = sanitize_text_field( (string) ( $context['remote_addr'] ?? '' ) );
+		if ( 1 !== preg_match( '/^[a-f0-9]{64}$/', $client ) || false === filter_var( $ip, FILTER_VALIDATE_IP ) ) {
+			return new WP_Error( 'public_write_admission_unavailable', __( 'Request admission is temporarily unavailable.', 'extrachill-api' ), array( 'status' => 503 ) );
+		}
+	} else {
 		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
 		if ( '' === $ip || false === filter_var( $ip, FILTER_VALIDATE_IP ) ) {
-			return true;
+			return new WP_Error( 'public_write_admission_unavailable', __( 'Request admission is temporarily unavailable.', 'extrachill-api' ), array( 'status' => 503 ) );
 		}
 		$client = hash_hmac( 'sha256', $ip, wp_salt( 'nonce' ) );
 	}

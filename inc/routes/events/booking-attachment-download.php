@@ -671,7 +671,14 @@ function extrachill_api_private_stream_from_affinity_response( array $http_respo
 	$safe        = extrachill_api_private_stream_headers( $filename, $mime, $size );
 	if ( 206 === $status ) {
 		$content_range = (string) ( $headers['content-range'] ?? ( $headers['Content-Range'] ?? '' ) );
-		if ( 1 !== preg_match( '/^bytes (\d+)-(\d+)\/(\d+)$/', $content_range, $range ) || (int) $range[2] < (int) $range[1] || (int) $range[2] - (int) $range[1] + 1 !== (int) $size || (int) $range[3] > extrachill_api_booking_attachment_max_bytes() ) {
+		if ( 1 !== preg_match( '/^bytes (\d+)-(\d+)\/(\d+)$/', $content_range, $range ) ) {
+			extrachill_api_discard_private_affinity_spool( $path );
+			return extrachill_api_booking_attachment_download_error( 502 );
+		}
+		$start = (int) $range[1];
+		$end   = (int) $range[2];
+		$total = (int) $range[3];
+		if ( $total < 1 || $start < 0 || $start > $end || $end >= $total || $end - $start + 1 !== (int) $size || $total > extrachill_api_booking_attachment_max_bytes() ) {
 			extrachill_api_discard_private_affinity_spool( $path );
 			return extrachill_api_booking_attachment_download_error( 502 );
 		}

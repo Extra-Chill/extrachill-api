@@ -304,6 +304,28 @@ namespace {
 			);
 			$this->assertWPError( $bad );
 			$this->assertFileDoesNotExist( $bad_path );
+
+			foreach ( array( 'bytes 0-3/0', 'bytes 4-7/4', 'bytes 6-9/8' ) as $content_range ) {
+				$invalid_path = wp_tempnam( 'booking-affinity-range' );
+				file_put_contents( $invalid_path, 'part' );
+				$invalid = extrachill_api_private_stream_from_affinity_response(
+					array(
+						'headers'  => array_merge(
+							array(
+								'Content-Length' => '4',
+								'Content-Range'  => $content_range,
+							),
+							extrachill_api_booking_attachment_affinity_delivery_headers( $delivery, array( 'nonce' => $nonce ) )
+						),
+						'body'     => '',
+						'response' => array( 'code' => 206 ),
+					),
+					$invalid_path,
+					$nonce
+				);
+				$this->assertWPError( $invalid, $content_range );
+				$this->assertFileDoesNotExist( $invalid_path );
+			}
 		}
 
 		/** Affinity target spooling is non-terminal; only outer client serving completes delivery. */
