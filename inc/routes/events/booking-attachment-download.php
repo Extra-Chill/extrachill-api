@@ -43,6 +43,15 @@ function extrachill_api_register_booking_attachment_download_route() {
 	);
 	register_rest_route(
 		'extrachill/v1',
+		'/events/internal/booking-attachment-handoff',
+		array(
+			'methods'             => WP_REST_Server::CREATABLE,
+			'callback'            => 'extrachill_api_issue_booking_attachment_handoff_request',
+			'permission_callback' => 'extrachill_api_booking_attachment_handoff_internal_permission',
+		)
+	);
+	register_rest_route(
+		'extrachill/v1',
 		'/events/internal/booking-attachment-delivery',
 		array(
 			'methods'             => WP_REST_Server::CREATABLE,
@@ -52,17 +61,53 @@ function extrachill_api_register_booking_attachment_download_route() {
 	);
 }
 
+/** Admit descriptor preflight only through body-bound localhost user transport. */
+function extrachill_api_booking_attachment_handoff_internal_permission( WP_REST_Request $request ) {
+	$timestamp         = (int) $request->get_header( 'X-EC-Handoff-Timestamp' );
+	$signature         = (string) $request->get_header( 'X-EC-Handoff-Signature' );
+	$input             = (array) $request->get_json_params();
+	$expected          = extrachill_api_booking_attachment_delivery_callback_signature( $input, get_current_user_id(), $timestamp );
+	$verified          = $timestamp > 0 && abs( time() - $timestamp ) <= 60 && '' !== $signature && hash_equals( $expected, $signature );
+
+	return extrachill_api_is_local_request() && extrachill_api_booking_attachment_has_verified_internal_user() && $verified
+		? true
+		: extrachill_api_booking_attachment_download_error( 403 );
+}
+
+/** Issue one Events-owned descriptor before the streamed affinity request. */
+function extrachill_api_issue_booking_attachment_handoff_request( WP_REST_Request $request ) {
+	$descriptor = extrachill_api_issue_booking_attachment_descriptor(
+		array(
+			'booking_id'    => (int) $request->get_param( 'booking_id' ),
+			'attachment_id' => (int) $request->get_param( 'attachment_id' ),
+		)
+	);
+
+	return is_wp_error( $descriptor ) ? extrachill_api_booking_attachment_download_error( 502 ) : new WP_REST_Response( $descriptor, 200 );
+}
+
 /** Admit terminal callbacks only through localhost signed-user transport. */
 function extrachill_api_booking_attachment_delivery_internal_permission( WP_REST_Request $request ) {
-	$has_internal_auth = ! empty( $_SERVER['HTTP_X_EC_INTERNAL_USER'] ) && ! empty( $_SERVER['HTTP_X_EC_INTERNAL_TIMESTAMP'] ) && ! empty( $_SERVER['HTTP_X_EC_INTERNAL_SIGNATURE'] );
 	$timestamp         = (int) $request->get_header( 'X-EC-Delivery-Timestamp' );
 	$signature         = (string) $request->get_header( 'X-EC-Delivery-Signature' );
 	$input             = (array) $request->get_json_params();
 	$expected          = extrachill_api_booking_attachment_delivery_callback_signature( $input, get_current_user_id(), $timestamp );
 	$verified          = $timestamp > 0 && abs( time() - $timestamp ) <= 60 && '' !== $signature && hash_equals( $expected, $signature );
-	return extrachill_api_is_local_request() && $has_internal_auth && is_user_logged_in() && $verified
+	return extrachill_api_is_local_request() && extrachill_api_booking_attachment_has_verified_internal_user() && $verified
 		? true
 		: extrachill_api_booking_attachment_download_error( 403 );
+}
+
+/** Verify the canonical signed internal user independently of auth hook order. */
+function extrachill_api_booking_attachment_has_verified_internal_user() {
+	$user_id   = isset( $_SERVER['HTTP_X_EC_INTERNAL_USER'] ) ? (int) $_SERVER['HTTP_X_EC_INTERNAL_USER'] : 0;
+	$timestamp = isset( $_SERVER['HTTP_X_EC_INTERNAL_TIMESTAMP'] ) ? (int) $_SERVER['HTTP_X_EC_INTERNAL_TIMESTAMP'] : 0;
+	$signature = isset( $_SERVER['HTTP_X_EC_INTERNAL_SIGNATURE'] ) ? (string) $_SERVER['HTTP_X_EC_INTERNAL_SIGNATURE'] : '';
+
+	return $user_id > 0
+		&& get_current_user_id() === $user_id
+		&& function_exists( 'ec_cross_site_verify_signature' )
+		&& ec_cross_site_verify_signature( $user_id, $timestamp, $signature );
 }
 
 /** Sign one short-lived terminal callback independently of caller auth. */
@@ -109,22 +154,13 @@ function extrachill_api_download_booking_attachment( WP_REST_Request $request ) 
 		return extrachill_api_booking_attachment_download_error( 503 );
 	}
 
-	$ability = wp_get_ability( 'extrachill/download-booking-attachment' );
-	if ( ! $ability ) {
-		return extrachill_api_booking_attachment_download_error( 503 );
-	}
-
 	$input   = array(
 		'booking_id'    => (int) $request->get_param( 'booking_id' ),
 		'attachment_id' => (int) $request->get_param( 'attachment_id' ),
 	);
-	$allowed = $ability->check_permissions( $input );
-	if ( true !== $allowed ) {
-		return extrachill_api_booking_attachment_download_error( 404 );
-	}
-
-	$descriptor = $ability->execute( $input );
-	if ( is_wp_error( $descriptor ) || ! is_array( $descriptor ) ) {
+	$context = function_exists( 'extrachill_api_route_affinity_context' ) ? extrachill_api_route_affinity_context( $request ) : array();
+	$descriptor = is_array( $context['download_handoff'] ?? null ) ? $context['download_handoff'] : extrachill_api_issue_booking_attachment_descriptor( $input );
+	if ( is_wp_error( $descriptor ) ) {
 		return extrachill_api_booking_attachment_download_error( extrachill_api_booking_attachment_error_status( $descriptor ) );
 	}
 
@@ -175,6 +211,76 @@ function extrachill_api_download_booking_attachment( WP_REST_Request $request ) 
 	}
 
 	return $response;
+}
+
+/** Authorize and issue one Events-owned download descriptor. */
+function extrachill_api_issue_booking_attachment_descriptor( array $input ) {
+	$ability = wp_get_ability( 'extrachill/download-booking-attachment' );
+	if ( ! $ability ) {
+		return new WP_Error( 'booking_attachment_descriptor_unavailable' );
+	}
+	$allowed = $ability->check_permissions( $input );
+	if ( true !== $allowed ) {
+		return is_wp_error( $allowed ) ? $allowed : new WP_Error( 'booking_attachment_descriptor_forbidden', '', array( 'status' => 404 ) );
+	}
+	$descriptor = $ability->execute( $input );
+
+	return is_array( $descriptor ) ? $descriptor : ( is_wp_error( $descriptor ) ? $descriptor : new WP_Error( 'booking_attachment_descriptor_invalid' ) );
+}
+
+/** Obtain the private descriptor before opening the streamed loopback. */
+function extrachill_api_prepare_booking_attachment_affinity_handoff( WP_REST_Request $request ) {
+	$input = array(
+		'booking_id'    => (int) $request->get_param( 'booking_id' ),
+		'attachment_id' => (int) $request->get_param( 'attachment_id' ),
+	);
+	$timestamp = time();
+	$result    = ec_cross_site_rest_request_http(
+		'events',
+		'POST',
+		'/events/internal/booking-attachment-handoff',
+		array(
+			'body'    => $input,
+			'headers' => array(
+				'X-EC-Handoff-Timestamp' => (string) $timestamp,
+				'X-EC-Handoff-Signature' => extrachill_api_booking_attachment_delivery_callback_signature( $input, get_current_user_id(), $timestamp ),
+			),
+			'user_id' => get_current_user_id(),
+			'timeout' => 10,
+		)
+	);
+
+	return extrachill_api_validate_booking_attachment_handoff( $result ) ? $result : extrachill_api_booking_attachment_download_error( 502 );
+}
+
+/** Validate the exact opaque handoff shape carried inside affinity HMAC. */
+function extrachill_api_validate_booking_attachment_handoff( $handoff ) {
+	return is_array( $handoff )
+		&& is_string( $handoff['stream_token'] ?? null )
+		&& 1 === preg_match( '/^[a-f0-9]{64}$/', $handoff['stream_token'] )
+		&& is_string( $handoff['correlation_id'] ?? null )
+		&& wp_is_uuid( $handoff['correlation_id'], 4 );
+}
+
+/** Encode a bounded internal handoff for one signed affinity hop. */
+function extrachill_api_encode_booking_attachment_handoff( array $handoff ) {
+	return rtrim( strtr( base64_encode( wp_json_encode( $handoff ) ), '+/', '-_' ), '=' );
+}
+
+/** Decode only a valid handoff after affinity HMAC verification. */
+function extrachill_api_decode_booking_attachment_handoff( $encoded ) {
+	$encoded = (string) $encoded;
+	if ( '' === $encoded || strlen( $encoded ) > 4096 || 1 !== preg_match( '/^[A-Za-z0-9_-]+$/', $encoded ) ) {
+		return null;
+	}
+	$padding = strlen( $encoded ) % 4;
+	if ( $padding ) {
+		$encoded .= str_repeat( '=', 4 - $padding );
+	}
+	$decoded = base64_decode( strtr( $encoded, '-_', '+/' ), true );
+	$handoff = is_string( $decoded ) ? json_decode( $decoded, true ) : null;
+
+	return extrachill_api_validate_booking_attachment_handoff( $handoff ) ? $handoff : null;
 }
 
 /** Record one Events-owned terminal delivery outcome without exposing it. */
