@@ -18,7 +18,30 @@ const EXTRACHILL_API_BOOKING_MAX_AGGREGATE_BYTES = 50 * MB_IN_BYTES;
 add_filter( 'ec_route_site_affinity_map', 'extrachill_api_add_booking_route_affinity' );
 add_filter( 'extrachill_api_route_affinity_signature_body', 'extrachill_api_booking_affinity_signature_body', 10, 2 );
 add_filter( 'extrachill_api_route_affinity_file_forward', 'extrachill_api_booking_affinity_file_forward', 10, 5 );
+add_filter( 'rest_post_dispatch', 'extrachill_api_booking_transport_error_headers', 20, 3 );
 add_action( 'extrachill_api_register_routes', 'extrachill_api_register_booking_inquiry_route' );
+
+/** Promote only stable booking error headers out of REST JSON metadata. */
+function extrachill_api_booking_transport_error_headers( $response, $server, $request ) {
+	unset( $server );
+	$route = $request->get_route();
+	if ( ! preg_match( '#^/extrachill/v1/(?:venues/\d+/booking-inquiries|events/bookings/\d+/attachments/\d+/download)$#', $route ) ) {
+		return $response;
+	}
+	$data    = $response->get_data();
+	$headers = is_array( $data ) && is_array( $data['data']['headers'] ?? null ) ? $data['data']['headers'] : array();
+	foreach ( array( 'Retry-After', 'Content-Range' ) as $name ) {
+		if ( isset( $headers[ $name ] ) && is_scalar( $headers[ $name ] ) ) {
+			$response->header( $name, (string) $headers[ $name ] );
+		}
+	}
+	if ( $headers ) {
+		unset( $data['data']['headers'] );
+		$response->set_data( $data );
+	}
+
+	return $response;
+}
 
 /** Route booking inquiries to the Events site on a segment boundary. */
 function extrachill_api_add_booking_route_affinity( $affinity_map ) {
@@ -289,8 +312,8 @@ function extrachill_api_normalize_booking_files( WP_REST_Request $request ) {
 		if ( $aggregate_size > EXTRACHILL_API_BOOKING_MAX_AGGREGATE_BYTES ) {
 			return new WP_Error( 'booking_attachment_aggregate_size_invalid', __( 'The combined booking attachments are too large.', 'extrachill-api' ), array( 'status' => 413 ) );
 		}
-		$file['name'] = sanitize_file_name( (string) $file['name'] );
-		$file['size'] = $actual_size;
+		$file['name']   = sanitize_file_name( (string) $file['name'] );
+		$file['size']   = $actual_size;
 		$file['sha256'] = hash_file( 'sha256', $file['tmp_name'] );
 		if ( false === $file['sha256'] ) {
 			return new WP_Error( 'booking_attachment_upload_failed', __( 'A booking attachment could not be received.', 'extrachill-api' ), array( 'status' => 400 ) );
@@ -326,9 +349,28 @@ function extrachill_api_booking_public_error( WP_Error $error ) {
 	if ( $status < 400 || $status > 599 ) {
 		$status = 0 === strpos( $code, 'invalid_' ) || false !== strpos( $code, '_required' ) ? 400 : 503;
 	}
-	$public_code = in_array( $status, array( 400, 403, 409, 413, 429 ), true ) ? $code : 'booking_inquiry_unavailable';
-	$message     = in_array( $status, array( 400, 403, 409, 413, 429 ), true ) ? $error->get_error_message() : __( 'Booking inquiry processing is temporarily unavailable.', 'extrachill-api' );
-	return new WP_Error( $public_code, $message, array( 'status' => $status ) );
+	$safe = in_array( $status, array( 400, 403, 409, 413, 429 ), true ) || 'booking_inquiry_reconciliation_required' === $code;
+	if ( ! $safe ) {
+		$status = 503;
+	}
+	$public_code = $code;
+	if ( 409 === $status && false !== strpos( $code, 'config' ) ) {
+		$public_code = 'booking_inquiry_stale_config';
+	} elseif ( in_array( $status, array( 400, 413 ), true ) && false !== strpos( $code, 'attachment' ) ) {
+		$public_code = 'booking_attachment_rejected';
+	}
+	$public_data = array( 'status' => $status );
+	foreach ( array( 'retryable', 'reconciliation_required', 'retry_after', 'headers' ) as $key ) {
+		if ( array_key_exists( $key, $data ) ) {
+			$public_data[ $key ] = $data[ $key ];
+		}
+	}
+
+	return new WP_Error(
+		$safe ? $public_code : 'booking_inquiry_unavailable',
+		$safe ? $error->get_error_message() : __( 'Booking inquiry processing is temporarily unavailable.', 'extrachill-api' ),
+		$public_data
+	);
 }
 
 /** Add file descriptors to the affinity signature without exposing bytes. */
@@ -397,7 +439,7 @@ function extrachill_api_booking_affinity_file_forward( $response, $target_site, 
 	if ( is_wp_error( $body ) ) {
 		return $body;
 	}
-	$headers  = array_merge(
+	$headers = array_merge(
 		(array) ( $args['headers'] ?? array() ),
 		array(
 			'Host'         => $host,

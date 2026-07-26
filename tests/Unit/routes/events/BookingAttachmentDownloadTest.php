@@ -165,7 +165,9 @@ namespace {
 			$this->assertSame( array( 'offset' => 2, 'length' => 4, 'status' => 206 ), extrachill_api_booking_attachment_range( 'bytes=2-5', 10 ) );
 			$this->assertSame( array( 'offset' => 7, 'length' => 3, 'status' => 206 ), extrachill_api_booking_attachment_range( 'bytes=-3', 10 ) );
 			$this->assertWPError( extrachill_api_booking_attachment_range( 'bytes=0-1,4-5', 10 ) );
-			$this->assertWPError( extrachill_api_booking_attachment_range( 'bytes=20-', 10 ) );
+			$unsatisfied = extrachill_api_booking_attachment_range( 'bytes=20-', 10 );
+			$this->assertWPError( $unsatisfied );
+			$this->assertSame( 'bytes */10', $unsatisfied->get_error_data()['headers']['Content-Range'] );
 
 			add_filter( 'extrachill_api_booking_attachment_max_bytes', array( $this, 'one_byte_limit' ) );
 			$stream = fopen( 'php://temp', 'w+b' );
@@ -190,6 +192,38 @@ namespace {
 			$this->assertFalse( is_resource( $stream ) );
 		}
 
+		/** Partial reads and unserved shutdown cleanup report exact terminal outcomes. */
+		public function test_partial_and_unserved_streams_record_terminal_outcomes() {
+			wp_set_current_user( self::factory()->user->create() );
+			$partial_delivery = array(
+				'booking_id'     => 10,
+				'attachment_id'  => 2,
+				'correlation_id' => '11111111-1111-4111-8111-111111111110',
+			);
+			$stream = fopen( 'php://temp', 'w+b' );
+			fwrite( $stream, 'abc' );
+			rewind( $stream );
+			$response = extrachill_api_register_private_stream( $stream, 5, 200, array(), null, $partial_delivery );
+			$this->assertSame( 'abc', $this->serve( $response ) );
+			$this->assertSame( 'partial', $this->delivery_outcomes[0]['outcome'] );
+			$this->assertSame( 3, $this->delivery_outcomes[0]['bytes_sent'] );
+
+			$interrupted_delivery = array(
+				'booking_id'     => 11,
+				'attachment_id'  => 3,
+				'correlation_id' => '11111111-1111-4111-8111-111111111111',
+			);
+			$unserved = fopen( 'php://temp', 'w+b' );
+			fwrite( $unserved, 'pending' );
+			rewind( $unserved );
+			extrachill_api_register_private_stream( $unserved, 7, 200, array(), null, $interrupted_delivery );
+			extrachill_api_cleanup_private_streams();
+
+			$this->assertSame( 'interrupted', $this->delivery_outcomes[1]['outcome'] );
+			$this->assertSame( 0, $this->delivery_outcomes[1]['bytes_sent'] );
+			$this->assertFalse( is_resource( $unserved ) );
+		}
+
 		/** Rate limiting occurs before a second handoff can be issued. */
 		public function test_rate_limit_precedes_handoff_issuance() {
 			wp_set_current_user( self::factory()->user->create() );
@@ -201,6 +235,7 @@ namespace {
 			remove_filter( 'extrachill_api_booking_attachment_download_rate_limit', array( $this, 'one_byte_limit' ) );
 
 			$this->assertSame( 429, $second->get_status() );
+			$this->assertSame( '60', $this->response_header( $second, 'retry-after' ) );
 			$this->assertCount( 1, $this->audit );
 		}
 
@@ -328,12 +363,13 @@ namespace {
 
 		/** Dispatch one request through the real REST server. */
 		private function dispatch( $booking_id, $attachment_id ) {
-			return rest_do_request(
-				new WP_REST_Request(
-					'GET',
-					sprintf( '/extrachill/v1/events/bookings/%d/attachments/%d/download', $booking_id, $attachment_id )
-				)
+			$request  = new WP_REST_Request(
+				'GET',
+				sprintf( '/extrachill/v1/events/bookings/%d/attachments/%d/download', $booking_id, $attachment_id )
 			);
+			$response = rest_do_request( $request );
+
+			return extrachill_api_protect_booking_attachment_download_response( $response, rest_get_server(), $request );
 		}
 
 		/** Capture manual byte serving for one response. */

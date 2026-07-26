@@ -92,7 +92,7 @@ function extrachill_api_download_booking_attachment( WP_REST_Request $request ) 
 		return extrachill_api_booking_attachment_download_error( extrachill_api_booking_attachment_error_status( $descriptor ) );
 	}
 
-	$token = $descriptor['stream_token'] ?? null;
+	$token          = $descriptor['stream_token'] ?? null;
 	$correlation_id = $descriptor['correlation_id'] ?? null;
 	if ( ! is_string( $token ) || 1 !== preg_match( '/^[a-f0-9]{64}$/', $token ) || ! is_string( $correlation_id ) || ! wp_is_uuid( $correlation_id, 4 ) ) {
 		return extrachill_api_booking_attachment_download_error( 502 );
@@ -155,7 +155,7 @@ function extrachill_api_record_booking_attachment_delivery( array $delivery, $ou
 	if ( ! $ability ) {
 		return false;
 	}
-	$input = array(
+	$input   = array(
 		'booking_id'     => (int) ( $delivery['booking_id'] ?? 0 ),
 		'attachment_id'  => (int) ( $delivery['attachment_id'] ?? 0 ),
 		'correlation_id' => (string) ( $delivery['correlation_id'] ?? '' ),
@@ -341,16 +341,16 @@ function extrachill_api_private_stream_headers( $filename, $mime, $length, $corr
 	$mime     = 1 === preg_match( '#^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$#i', $mime ) ? strtolower( $mime ) : 'application/octet-stream';
 
 	$headers = array(
-		'Accept-Ranges'             => 'bytes',
-		'Cache-Control'             => 'private, no-store, no-cache, must-revalidate, max-age=0',
-		'Content-Disposition'       => 'attachment; filename="' . $fallback . '"; filename*=UTF-8\'\'' . rawurlencode( $safe_filename ),
-		'Content-Length'            => (string) $length,
-		'Content-Type'              => $mime,
-		'Expires'                   => '0',
-		'Pragma'                    => 'no-cache',
-		'Vary'                      => 'Authorization, Cookie',
-		'X-Content-Type-Options'    => 'nosniff',
-		'X-Robots-Tag'              => 'noindex, nofollow, noarchive',
+		'Accept-Ranges'          => 'bytes',
+		'Cache-Control'          => 'private, no-store, no-cache, must-revalidate, max-age=0',
+		'Content-Disposition'    => 'attachment; filename="' . $fallback . '"; filename*=UTF-8\'\'' . rawurlencode( $safe_filename ),
+		'Content-Length'         => (string) $length,
+		'Content-Type'           => $mime,
+		'Expires'                => '0',
+		'Pragma'                 => 'no-cache',
+		'Vary'                   => 'Authorization, Cookie',
+		'X-Content-Type-Options' => 'nosniff',
+		'X-Robots-Tag'           => 'noindex, nofollow, noarchive',
 	);
 	if ( is_string( $correlation_id ) && wp_is_uuid( $correlation_id, 4 ) ) {
 		$headers['X-EC-Download-Correlation'] = $correlation_id;
@@ -361,6 +361,9 @@ function extrachill_api_private_stream_headers( $filename, $mime, $length, $corr
 
 /** Keep every success and failure for this private route out of caches. */
 function extrachill_api_protect_booking_attachment_download_response( $response, $server, $request ) {
+	if ( function_exists( 'extrachill_api_booking_transport_error_headers' ) ) {
+		$response = extrachill_api_booking_transport_error_headers( $response, $server, $request );
+	}
 	unset( $server );
 	if ( ! extrachill_api_is_booking_attachment_download_route( $request->get_route() ) ) {
 		return $response;
@@ -465,7 +468,7 @@ function extrachill_api_serve_private_stream( $served, $result, $request, $serve
 				break;
 			}
 			echo $chunk; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Verified private binary transport.
-			$remaining -= strlen( $chunk );
+			$remaining  -= strlen( $chunk );
 			$bytes_sent += strlen( $chunk );
 			if ( connection_aborted() ) {
 				break;

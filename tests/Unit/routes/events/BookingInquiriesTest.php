@@ -135,6 +135,26 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 		$this->assertSame( '60', $result->get_error_data()['headers']['Retry-After'] );
 	}
 
+	public function test_booking_error_headers_are_allowlisted_and_removed_from_json() {
+		$error = new WP_Error(
+			'public_write_rate_limited',
+			'Too many requests.',
+			array(
+				'status'  => 429,
+				'headers' => array(
+					'Retry-After' => '60',
+					'X-Private'   => '/private/root',
+				),
+			)
+		);
+		$request  = new WP_REST_Request( 'POST', '/extrachill/v1/venues/42/booking-inquiries' );
+		$response = extrachill_api_booking_transport_error_headers( rest_convert_error_to_response( $error ), rest_get_server(), $request );
+
+		$this->assertSame( '60', $response->get_headers()['Retry-After'] );
+		$this->assertArrayNotHasKey( 'X-Private', $response->get_headers() );
+		$this->assertArrayNotHasKey( 'headers', $response->get_data()['data'] );
+	}
+
 	public function test_unsigned_remote_address_is_not_trusted() {
 		$request = $this->valid_request();
 		$request->set_param( '_ec_affinity_remote_addr', '203.0.113.99' );
@@ -223,10 +243,28 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 
 	public function test_domain_errors_map_to_stable_public_statuses() {
 		$conflict = extrachill_api_booking_public_error( new WP_Error( 'booking_idempotency_conflict', 'Conflict.', array( 'status' => 409 ) ) );
+		$stale = extrachill_api_booking_public_error( new WP_Error( 'venue_booking_config_version_conflict', 'Refresh configuration.', array( 'status' => 409 ) ) );
+		$attachment = extrachill_api_booking_public_error( new WP_Error( 'invalid_booking_attachment_type', 'Unsupported file.', array( 'status' => 400 ) ) );
+		$reconcile = extrachill_api_booking_public_error(
+			new WP_Error(
+				'booking_inquiry_reconciliation_required',
+				'Reconciliation required.',
+				array(
+					'status'                  => 503,
+					'retryable'               => true,
+					'reconciliation_required' => true,
+				)
+			)
+		);
 		$internal = extrachill_api_booking_public_error( new WP_Error( 'booking_read_failed', 'Database details.' ) );
 
 		$this->assertSame( 409, $conflict->get_error_data()['status'] );
 		$this->assertSame( 'booking_idempotency_conflict', $conflict->get_error_code() );
+		$this->assertSame( 'booking_inquiry_stale_config', $stale->get_error_code() );
+		$this->assertSame( 'booking_attachment_rejected', $attachment->get_error_code() );
+		$this->assertSame( 'booking_inquiry_reconciliation_required', $reconcile->get_error_code() );
+		$this->assertTrue( $reconcile->get_error_data()['retryable'] );
+		$this->assertTrue( $reconcile->get_error_data()['reconciliation_required'] );
 		$this->assertSame( 503, $internal->get_error_data()['status'] );
 		$this->assertSame( 'booking_inquiry_unavailable', $internal->get_error_code() );
 		$this->assertStringNotContainsString( 'Database', $internal->get_error_message() );
