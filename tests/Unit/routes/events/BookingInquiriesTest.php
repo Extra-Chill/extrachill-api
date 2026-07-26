@@ -12,11 +12,15 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 	private $ability_inputs = array();
 
 	/** @var array */
+	private $ability_actor_ids = array();
+
+	/** @var array */
 	private $temporary_files = array();
 
 	public function set_up() {
 		parent::set_up();
 		$this->ability_inputs  = array();
+		$this->ability_actor_ids = array();
 		$this->temporary_files = array();
 		if ( isset( wp_get_abilities()[ EXTRACHILL_API_BOOKING_ABILITY ] ) ) {
 			wp_unregister_ability( EXTRACHILL_API_BOOKING_ABILITY );
@@ -26,6 +30,7 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 	}
 
 	public function tear_down() {
+		wp_clear_auth_cookie();
 		remove_all_filters( 'extrachill_bypass_turnstile_verification' );
 		remove_all_filters( 'extrachill_api_booking_inquiry_rate_limit' );
 		remove_all_filters( 'extrachill_api_allow_test_booking_file' );
@@ -69,23 +74,43 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 		$this->assertSame( 0, get_current_user_id() );
 	}
 
-	public function test_submitted_identity_is_never_forwarded() {
+	public function test_submitted_identity_is_rejected_before_security_or_execution() {
 		$request = $this->valid_request();
 		$request->set_param( 'user_id', 999 );
 		$request->set_param( 'submitter_user_id', 998 );
-		extrachill_api_handle_booking_inquiry( $request );
+		$result = extrachill_api_booking_inquiry_permission( $request );
 
-		$this->assertArrayNotHasKey( 'user_id', $this->ability_inputs[0] );
-		$this->assertArrayNotHasKey( 'submitter_user_id', $this->ability_inputs[0] );
+		$this->assertWPError( $result );
+		$this->assertSame( 'booking_identity_not_allowed', $result->get_error_code() );
+		$this->assertEmpty( $this->ability_inputs );
 	}
 
-	public function test_authenticated_identity_remains_request_identity() {
+	public function test_cookie_authenticated_identity_remains_canonical_context() {
 		$user_id = self::factory()->user->create();
 		wp_set_current_user( $user_id );
+		wp_set_auth_cookie( $user_id );
 		extrachill_api_handle_booking_inquiry( $this->valid_request() );
 
 		$this->assertSame( $user_id, get_current_user_id() );
 		$this->assertArrayNotHasKey( 'user_id', $this->ability_inputs[0] );
+		$this->assertSame( $user_id, $this->ability_actor_ids[0] );
+	}
+
+	public function test_bearer_authenticated_identity_uses_validated_context_not_header_data() {
+		$user_id = self::factory()->user->create();
+		wp_set_current_user( $user_id );
+		$request = $this->valid_request();
+		$request->set_header( 'Authorization', 'Bearer provider-validated-token' );
+		extrachill_api_handle_booking_inquiry( $request );
+
+		$this->assertSame( $user_id, $this->ability_actor_ids[0] );
+		$this->assertArrayNotHasKey( 'authorization', $this->ability_inputs[0] );
+	}
+
+	public function test_anonymous_identity_validation_does_not_require_registration() {
+		wp_set_current_user( 0 );
+
+		$this->assertTrue( extrachill_api_booking_validate_canonical_identity() );
 	}
 
 	public function test_missing_turnstile_primitive_fails_before_ability_execution() {
@@ -260,6 +285,7 @@ class Booking_InquiriesTest extends WP_UnitTestCase {
 					'permission_callback' => '__return_true',
 					'execute_callback'    => static function ( $input ) use ( $test ) {
 						$test->ability_inputs[] = $input;
+						$test->ability_actor_ids[] = get_current_user_id();
 						return array(
 							'public_id'     => '11111111-1111-4111-8111-111111111111',
 							'venue_term_id' => $input['venue_term_id'],

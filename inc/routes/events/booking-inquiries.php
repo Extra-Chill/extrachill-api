@@ -139,6 +139,11 @@ function extrachill_api_validate_booking_attachment_purposes( $value ) {
 
 /** Enforce Turnstile before consuming the public-write rate budget. */
 function extrachill_api_booking_inquiry_permission( WP_REST_Request $request ) {
+	foreach ( array( 'user_id', 'submitter_user_id', 'uploader_user_id' ) as $identity_field ) {
+		if ( null !== $request->get_param( $identity_field ) ) {
+			return new WP_Error( 'booking_identity_not_allowed', __( 'Caller identity cannot be submitted as form data.', 'extrachill-api' ), array( 'status' => 400 ) );
+		}
+	}
 	if ( ! function_exists( 'ec_turnstile_check_request' ) ) {
 		return new WP_Error( 'booking_security_unavailable', __( 'Security verification is unavailable.', 'extrachill-api' ), array( 'status' => 503 ) );
 	}
@@ -165,6 +170,10 @@ function extrachill_api_booking_inquiry_permission( WP_REST_Request $request ) {
 
 /** Normalize and invoke the Events-owned inquiry and attachment contracts. */
 function extrachill_api_handle_booking_inquiry( WP_REST_Request $request ) {
+	$identity = extrachill_api_booking_validate_canonical_identity();
+	if ( is_wp_error( $identity ) ) {
+		return $identity;
+	}
 	$abilities = wp_get_abilities();
 	$ability   = $abilities[ EXTRACHILL_API_BOOKING_ABILITY ] ?? null;
 	if ( ! $ability || $ability->get_meta_item( 'show_in_rest' ) ) {
@@ -188,6 +197,20 @@ function extrachill_api_handle_booking_inquiry( WP_REST_Request $request ) {
 	}
 
 	return new WP_REST_Response( $result, 201 );
+}
+
+/** Accept anonymous callers or an existing user established by canonical auth. */
+function extrachill_api_booking_validate_canonical_identity() {
+	$user_id = get_current_user_id();
+	if ( $user_id < 1 ) {
+		return true;
+	}
+	$user = wp_get_current_user();
+	if ( ! $user instanceof WP_User || ! $user->exists() || (int) $user->ID !== $user_id ) {
+		return new WP_Error( 'booking_authentication_invalid', __( 'The authenticated booking identity is invalid.', 'extrachill-api' ), array( 'status' => 401 ) );
+	}
+
+	return true;
 }
 
 /** Build only fields accepted by the hidden ability schema. */
