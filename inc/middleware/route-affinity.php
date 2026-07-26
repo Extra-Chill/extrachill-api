@@ -372,7 +372,7 @@ function extrachill_api_route_affinity_dispatch( $result, WP_REST_Server $server
 	if ( $private_stream ) {
 		$handoff = extrachill_api_prepare_booking_attachment_affinity_handoff( $request );
 		if ( is_wp_error( $handoff ) ) {
-			return extrachill_api_booking_attachment_download_error( 502 );
+			return extrachill_api_fail_private_affinity_stream( $private_spool, null );
 		}
 		$forwarded_headers['x-ec-affinity-download-handoff'] = extrachill_api_encode_booking_attachment_handoff( $handoff );
 		$outer_delivery = array(

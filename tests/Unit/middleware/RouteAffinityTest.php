@@ -44,6 +44,9 @@ class Route_AffinityTest extends WP_UnitTestCase {
 	/** @var string */
 	private $loopback_error_bytes = '';
 
+	/** @var bool */
+	private $handoff_failure = false;
+
 	/**
 	 * Original server values changed by tests.
 	 *
@@ -69,6 +72,7 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		$this->downstream_response = $this->http_response( 200, array( 'ok' => true ) );
 		$this->delivery_outcomes   = array();
 		$this->loopback_error_bytes = '';
+		$this->handoff_failure      = false;
 		wp_set_current_user( 0 );
 		unset( $_SERVER['HTTP_COOKIE'], $_SERVER['HTTP_X_WP_NONCE'], $_SERVER['HTTP_X_EC_INTERNAL_USER'], $_SERVER['HTTP_X_EC_INTERNAL_TIMESTAMP'], $_SERVER['HTTP_X_EC_INTERNAL_SIGNATURE'] );
 
@@ -342,6 +346,30 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		$this->assertSame( 503, $missing->get_error_data()['status'] );
 		$this->assertSame( 503, $unprotected->get_error_data()['status'] );
 		$this->assertSame( 0, $this->request_count, 'Descriptor preflight must not run until spool setup succeeds.' );
+		$this->assertSame( array(), $this->delivery_outcomes );
+	}
+
+	/** Repeated preflight failures delete each prepared spool without callback. */
+	public function test_private_stream_preflight_failures_do_not_leak_spools() {
+		wp_set_current_user( self::factory()->user->create() );
+		$this->handoff_failure = true;
+		$paths = array();
+		$capture = static function ( $path ) use ( &$paths ) {
+			$paths[] = $path;
+			return $path;
+		};
+		add_filter( 'extrachill_api_private_affinity_spool_path', $capture );
+		for ( $attempt = 0; $attempt < 3; ++$attempt ) {
+			$response = $this->dispatch_affinity( new WP_REST_Request( 'GET', '/extrachill/v1/events/bookings/12/attachments/34/download' ) );
+			$this->assertWPError( $response );
+			$this->assertSame( 502, $response->get_error_data()['status'] );
+		}
+		remove_filter( 'extrachill_api_private_affinity_spool_path', $capture );
+
+		$this->assertCount( 3, $paths );
+		foreach ( $paths as $path ) {
+			$this->assertFileDoesNotExist( $path );
+		}
 		$this->assertSame( array(), $this->delivery_outcomes );
 	}
 
@@ -705,6 +733,9 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		$this->last_http_args = $args;
 		$this->last_http_url  = $url;
 		if ( false !== strpos( $url, '/events/internal/booking-attachment-handoff' ) ) {
+			if ( $this->handoff_failure ) {
+				return new WP_Error( 'http_request_failed', 'Descriptor preflight failed.' );
+			}
 			return $this->http_response(
 				200,
 				array(
