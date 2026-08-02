@@ -192,7 +192,7 @@ class Booking_AvailabilityTest extends WP_UnitTestCase {
 		return array(
 			'open interval'          => array( 'open', '2026-08-10 18:00:00', '2026-08-10 20:00:00', true ),
 			'pending inquiry'        => array( 'pending', '2026-08-10 18:00:00', '2026-08-10 20:00:00', true ),
-			'active hold'            => array( 'held', '2026-08-10 18:00:00', '2026-08-10 20:00:00', true ),
+			'active hold'            => array( 'held', '2026-08-10 18:00:00', '2026-08-10 20:00:00', false ),
 			'confirmed booking'      => array( 'confirmed', '2026-08-10 18:00:00', '2026-08-10 20:00:00', false ),
 			'canonical event'        => array( 'canonical', '2026-08-10 18:00:00', '2026-08-10 20:00:00', false ),
 			'half-open boundary'     => array( 'half-open', '2026-08-10 20:00:00', '2026-08-10 22:00:00', true ),
