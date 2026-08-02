@@ -488,7 +488,7 @@ class Route_AffinityTest extends WP_UnitTestCase {
 		$this->assertSame( array( 'available' => true ), $response->get_data() );
 		$this->assertSame( $body, json_decode( $this->last_http_args['body'], true ) );
 		$this->assertSame( (string) $user_id, $this->last_http_args['headers']['X-EC-Internal-User'] );
-		$this->assertStringContainsString( 'events.', $this->last_http_url );
+		$this->assertStringContainsString( 'events.', $this->last_http_args['headers']['Host'] );
 	}
 
 	/** Availability loopback failures and oversized success bodies are projected. */
