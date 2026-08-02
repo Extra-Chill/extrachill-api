@@ -29,7 +29,6 @@ class Booking_AvailabilityTest extends WP_UnitTestCase {
 		$this->rate_counts       = array();
 		$_SERVER['REMOTE_ADDR']  = '198.51.100.' . random_int( 1, 250 );
 		add_filter( 'extrachill_api_rate_limit_store', array( $this, 'use_test_rate_limit_store' ) );
-		$this->register_ability( false );
 	}
 
 	/** Remove test-owned global state. */
@@ -59,6 +58,7 @@ class Booking_AvailabilityTest extends WP_UnitTestCase {
 
 	/** The adapter sends only the Events schema and returns only its boolean. */
 	public function test_strict_input_and_exact_success_projection() {
+		$this->register_ability( false );
 		$this->ability_result = array(
 			'available'     => false,
 			'booking_id'    => 99,
@@ -81,6 +81,7 @@ class Booking_AvailabilityTest extends WP_UnitTestCase {
 
 	/** Caller identity remains ambient and can never be supplied in the body. */
 	public function test_anonymous_and_authenticated_callers_have_identical_projection() {
+		$this->register_ability( false );
 		$anonymous = extrachill_api_handle_booking_availability( $this->valid_request() );
 		$user_id   = self::factory()->user->create();
 		wp_set_current_user( $user_id );
@@ -164,6 +165,7 @@ class Booking_AvailabilityTest extends WP_UnitTestCase {
 	 */
 	public function test_policy_outcomes_pass_through_controlled_ability( $label, $start_at, $end_at, $available ) {
 		unset( $label );
+		$this->register_ability( false );
 		$this->ability_result = array( 'available' => $available );
 		$response             = extrachill_api_handle_booking_availability(
 			$this->valid_request(
