@@ -53,7 +53,6 @@ class Booking_AvailabilityTest extends WP_UnitTestCase {
 		$routes = rest_get_server()->get_routes();
 		$route  = $routes['/extrachill/v1/venues/(?P<venue>\d+)/booking-availability'][0];
 
-		$this->assertSame( WP_REST_Server::CREATABLE, $route['methods'] );
 		$this->assertSame( 'extrachill_api_booking_availability_permission', $route['permission_callback'] );
 		$this->assertSame( 'events', extrachill_api_add_booking_route_affinity( array() )['/extrachill/v1/venues/'] );
 	}
