@@ -46,7 +46,7 @@ function extrachill_api_handle_booking_availability( WP_REST_Request $request ) 
 		return $input;
 	}
 
-	$ability = wp_get_ability( EXTRACHILL_API_BOOKING_AVAILABILITY_ABILITY );
+	$ability = wp_get_abilities()[ EXTRACHILL_API_BOOKING_AVAILABILITY_ABILITY ] ?? null;
 	if ( ! $ability || false !== $ability->get_meta_item( 'show_in_rest' ) ) {
 		return extrachill_api_booking_availability_service_error();
 	}

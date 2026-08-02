@@ -37,7 +37,7 @@ class Booking_AvailabilityTest extends WP_UnitTestCase {
 		wp_clear_auth_cookie();
 		remove_all_filters( 'extrachill_api_booking_availability_rate_limit' );
 		remove_filter( 'extrachill_api_rate_limit_store', array( $this, 'use_test_rate_limit_store' ) );
-		if ( wp_get_ability( EXTRACHILL_API_BOOKING_AVAILABILITY_ABILITY ) ) {
+		if ( isset( wp_get_abilities()[ EXTRACHILL_API_BOOKING_AVAILABILITY_ABILITY ] ) ) {
 			wp_unregister_ability( EXTRACHILL_API_BOOKING_AVAILABILITY_ABILITY );
 		}
 		if ( wp_has_ability_category( 'booking-availability-tests' ) ) {
@@ -203,7 +203,7 @@ class Booking_AvailabilityTest extends WP_UnitTestCase {
 
 	/** Register the exact hidden ability contract used by Events PR #530. */
 	private function register_ability( $show_in_rest ) {
-		if ( wp_get_ability( EXTRACHILL_API_BOOKING_AVAILABILITY_ABILITY ) ) {
+		if ( isset( wp_get_abilities()[ EXTRACHILL_API_BOOKING_AVAILABILITY_ABILITY ] ) ) {
 			wp_unregister_ability( EXTRACHILL_API_BOOKING_AVAILABILITY_ABILITY );
 		}
 		if ( ! wp_has_ability_category( 'booking-availability-tests' ) ) {
