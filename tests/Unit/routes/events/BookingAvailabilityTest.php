@@ -56,6 +56,15 @@ class Booking_AvailabilityTest extends WP_UnitTestCase {
 		$this->assertSame( 'events', extrachill_api_add_booking_route_affinity( array() )['/extrachill/v1/venues/'] );
 	}
 
+	/** The controlled Events dependency is resolvable but remains REST-hidden. */
+	public function test_hidden_ability_fixture_is_registered() {
+		$this->register_ability( false );
+		$ability = wp_get_ability( EXTRACHILL_API_BOOKING_AVAILABILITY_ABILITY );
+
+		$this->assertNotNull( $ability );
+		$this->assertFalse( $ability->get_meta_item( 'show_in_rest' ) );
+	}
+
 	/** The adapter sends only the Events schema and returns only its boolean. */
 	public function test_strict_input_and_exact_success_projection() {
 		$this->register_ability( false );
