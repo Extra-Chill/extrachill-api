@@ -126,7 +126,6 @@ class Booking_AvailabilityTest extends WP_UnitTestCase {
 
 	/** Missing, REST-visible, failed, and malformed dependencies converge on one 503. */
 	public function test_dependency_failures_use_one_generic_retryable_error() {
-		wp_unregister_ability( EXTRACHILL_API_BOOKING_AVAILABILITY_ABILITY );
 		$this->assert_service_error( extrachill_api_handle_booking_availability( $this->valid_request() ) );
 
 		$this->register_ability( true );
