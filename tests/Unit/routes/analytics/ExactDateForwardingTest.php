@@ -86,9 +86,9 @@ final class ExactDateForwardingTest extends WP_UnitTestCase {
 				'session_gap_mins'   => 20,
 				'top_articles'       => 40,
 				'min_entry_sessions' => 3,
-				'author_id'           => 81,
-				'start_date'          => '2026-03-02',
-				'end_date'            => '2026-04-30',
+				'author_id'          => 81,
+				'start_date'         => '2026-03-02',
+				'end_date'           => '2026-04-30',
 			)
 		);
 
@@ -177,7 +177,8 @@ final class ExactDateForwardingTest extends WP_UnitTestCase {
 				'category'            => 'analytics-date-tests',
 				'input_schema'        => array(
 					'type'                 => 'object',
-					'additionalProperties' => true,
+					'properties'           => $this->ability_input_properties( $ability_name ),
+					'additionalProperties' => false,
 				),
 				'output_schema'       => array( 'type' => 'object' ),
 				'permission_callback' => '__return_true',
@@ -187,5 +188,43 @@ final class ExactDateForwardingTest extends WP_UnitTestCase {
 				},
 			)
 		);
+	}
+
+	/** Return a closed schema matching each production ability adapter. */
+	private function ability_input_properties( $ability_name ) {
+		$string = array( 'type' => 'string' );
+		$int    = array( 'type' => 'integer' );
+
+		$properties = array(
+			'extrachill/get-surface-growth'   => array(
+				'weeks'      => $int,
+				'start_date' => $string,
+				'end_date'   => $string,
+			),
+			'extrachill/get-retention-stats'  => array(
+				'days'         => $int,
+				'blog_id'      => $int,
+				'cohort_weeks' => $int,
+				'start_date'   => $string,
+				'end_date'     => $string,
+			),
+			'extrachill/get-conversion-map'   => array(
+				'days'               => $int,
+				'session_gap_mins'   => $int,
+				'top_articles'       => $int,
+				'min_entry_sessions' => $int,
+				'author_id'          => $int,
+				'start_date'         => $string,
+				'end_date'           => $string,
+			),
+			'extrachill/artist-get-analytics' => array(
+				'id'         => $int,
+				'date_range' => $int,
+				'start_date' => $string,
+				'end_date'   => $string,
+			),
+		);
+
+		return $properties[ $ability_name ];
 	}
 }
