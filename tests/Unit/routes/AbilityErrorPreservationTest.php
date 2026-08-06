@@ -163,7 +163,10 @@ final class AbilityErrorPreservationTest extends WP_UnitTestCase {
 					'type'                 => 'object',
 					'additionalProperties' => true,
 				),
-				'output_schema'       => array( 'type' => 'object' ),
+				'output_schema'       => array(
+					'type'                 => 'object',
+					'additionalProperties' => true,
+				),
 				'permission_callback' => '__return_true',
 				'execute_callback'    => static function () use ( $test, $ability_name ) {
 					return $test->ability_results[ $ability_name ];
