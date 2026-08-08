@@ -540,6 +540,6 @@ function extrachill_api_register_schema_parity_command() {
 	);
 }
 
-if ( defined( 'WP_CLI' ) && WP_CLI ) {
+if ( defined( 'WP_CLI' ) ) {
 	extrachill_api_register_schema_parity_command();
 }
