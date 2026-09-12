@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: Extra-Chill/homeboy-action@5b40b2b0c7167b668e8d4bd5d5ec33fcd124f1a9
+      - uses: Extra-Chill/homeboy-action@aba14988e24c30c7e1c7ea956131f861e343ad2b
         with:
           extension: wordpress
           commands: review lint,review test
