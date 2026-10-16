@@ -291,6 +291,7 @@ function extrachill_api_content_blocks_photo_contest_vote_handler( WP_REST_Reque
 			'contest_id'    => $request->get_param( 'contest_id' ),
 			'entry_id'      => $request->get_param( 'entry_id' ),
 			'email_address' => $request->get_param( 'email_address' ),
+			'ip'            => isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '',
 		)
 	);
 
@@ -303,6 +304,7 @@ function extrachill_api_content_blocks_photo_contest_vote_handler( WP_REST_Reque
 				'voting_closed'     => 403,
 				'already_voted'     => 409,
 				'invalid_email'     => 400,
+				'rate_limited'      => 429,
 			)
 		);
 	}

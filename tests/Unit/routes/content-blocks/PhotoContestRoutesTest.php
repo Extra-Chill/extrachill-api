@@ -275,6 +275,7 @@ class PhotoContestRoutesTest extends WP_UnitTestCase {
 			'voting_closed'     => array( 'voting_closed', 403 ),
 			'already_voted'     => array( 'already_voted', 409 ),
 			'invalid_email'     => array( 'invalid_email', 400 ),
+			'rate_limited'      => array( 'rate_limited', 429 ),
 		);
 	}
 
@@ -302,8 +303,19 @@ class PhotoContestRoutesTest extends WP_UnitTestCase {
 		$this->assertSame( 'mystery_failure', $response->get_data()['code'] );
 	}
 
+	/** The client IP passes through to the vote ability for per-IP rate limiting. */
+	public function test_vote_passes_ip_through() {
+		$_SERVER['REMOTE_ADDR'] = '198.51.100.4';
+
+		$response = rest_get_server()->dispatch( $this->vote_request() );
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( '198.51.100.4', $this->ability_inputs['extrachill/photo-contest-vote'][0]['ip'] );
+	}
+
 	/** Vote success returns the public {message, vote_count} envelope. */
 	public function test_vote_success_envelope() {
+		$_SERVER['REMOTE_ADDR'] = '203.0.113.9';
 		$this->ability_results['extrachill/photo-contest-vote'] = array(
 			'message'    => 'Vote counted.',
 			'vote_count' => 12,
@@ -326,6 +338,7 @@ class PhotoContestRoutesTest extends WP_UnitTestCase {
 				'contest_id'    => 'skinful-2025',
 				'entry_id'      => 7,
 				'email_address' => 'voter@example.com',
+				'ip'            => '203.0.113.9',
 			),
 			$this->ability_inputs['extrachill/photo-contest-vote'][0]
 		);
