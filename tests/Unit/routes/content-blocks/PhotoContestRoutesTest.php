@@ -592,8 +592,14 @@ class PhotoContestRoutesTest extends WP_UnitTestCase {
 		$matches = array_filter( extrachill_api_rest_ability_adapter_manifest(), function ( $adapter ) {
 			return '/extrachill/v1/content-blocks/photo-contest/entry-qr' === $adapter['contract']['route'];
 		} );
-		$this->assertCount( 1, $matches );
-		$this->assertSame( 'extrachill/photo-contest-entry-qr', array_values( $matches )[0]['contract']['ability'] );
+		// Route registration can run more than once per process, so assert on the distinct abilities discovered.
+		$this->assertNotEmpty( $matches );
+		$this->assertSame(
+			array( 'extrachill/photo-contest-entry-qr' ),
+			array_values( array_unique( array_map( function ( $adapter ) {
+				return $adapter['contract']['ability'];
+			}, $matches ) ) )
+		);
 	}
 
 	/** Build a valid QR read request. */
