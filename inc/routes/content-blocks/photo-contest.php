@@ -535,8 +535,8 @@ function extrachill_api_content_blocks_photo_contest_vote_handler( WP_REST_Reque
  * entries and votes. The payload carries no email or other personal data.
  *
  * @param string                    $route    Matched REST route.
- * @param WP_REST_Response|WP_Error $response Route result.
- * @param WP_REST_Request           $request  Request.
+ * @param mixed           $response Route result (response, error, or other).
+ * @param WP_REST_Request $request  Request.
  * @return array|null { type, data } or null when the route is not tracked.
  */
 function extrachill_api_content_blocks_photo_contest_attempt_event( $route, $response, $request ) {
@@ -573,9 +573,9 @@ function extrachill_api_content_blocks_photo_contest_attempt_event( $route, $res
 /**
  * Record contest entry and vote attempts. Never alters the response.
  *
- * @param mixed           $response Route result.
- * @param array           $handler  Route handler.
- * @param WP_REST_Request $request  Request.
+ * @param mixed $response Route result.
+ * @param array $handler  Route handler.
+ * @param mixed $request  Request (WP_REST_Request from core).
  * @return mixed Unchanged response.
  */
 function extrachill_api_content_blocks_photo_contest_track_attempt( $response, $handler, $request ) {
